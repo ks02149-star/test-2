@@ -3,7 +3,7 @@ import traceback
 import subprocess
 import os
 
-__version__ = "1.0"
+__version__ = "1.1"
 
 # --- [추가] 시스템 입출력 스트림 및 Qt 내부 경고 강제 음소거 ---
 # QFluentWidgets의 프로모션 텍스트 및 PyQt5의 폰트 열거 경고(qt.qpa.fonts) 출력 차단
@@ -2240,7 +2240,7 @@ class NewsWorker(QThread):
                     full_url = f"https://www.dmktnews.com{href}"
                     if not any(item['url'] == full_url for item in news_items):
                         news_items.append({'title': title, 'url': full_url})
-                    if len(news_items) >= 6:
+                    if len(news_items) >= 9:
                         break
                         
             self.finished.emit(news_items)
@@ -2277,7 +2277,7 @@ class FeatureCard(QFrame):
         layout.addWidget(self.content_label)
         layout.addStretch(1)
         
-        self.setFixedSize(280, 150)
+        self.setFixedSize(280, 120)
         self.setObjectName("FeatureCard")
         self.setStyleSheet("""
             #FeatureCard {
@@ -2381,7 +2381,7 @@ class HomeInterface(ScrollArea):
         self.greeting_label.setFont(QFont("SUIT", 42, QFont.Bold))
         self.greeting_label.setStyleSheet("color: #FFFFFF; background: transparent;")
         
-        self.subtitle_label = QLabel("푸름애드 블로그 관리 프로그램에 오신 것을 환영합니다.")
+        self.subtitle_label = QLabel("푸름애드 관리 프로그램에 오신 것을 환영합니다.")
         self.subtitle_label.setFont(QFont("SUIT", 16))
         self.subtitle_label.setStyleSheet("color: rgba(255, 255, 255, 0.8); background: transparent;")
         
@@ -2417,11 +2417,11 @@ class HomeInterface(ScrollArea):
         self.grid_layout = QGridLayout()
         self.grid_layout.setSpacing(20)
         
-        self.scraper_card = FeatureCard(FluentIcon.DOCUMENT, "블로그 순위 체크", "키워드 기반 순위 검색 및\\n데이터 추출")
-        self.place_card = FeatureCard(getattr(FluentIcon, "POI", FluentIcon.SEARCH), "플레이스 순위 체크", "모바일 플레이스 순위 검색\\n(광고 제외)")
-        self.company_card = FeatureCard(FluentIcon.PEOPLE, "업체 리스트", "저장된 관리 업체 목록 확인 및\\n수정")
-        self.index_card = FeatureCard(getattr(FluentIcon, "PIE_SINGLE", FluentIcon.DOCUMENT), "지수 체크", "블로그 지수 분석 및 확인")
-        self.spell_card = FeatureCard(FluentIcon.EDIT, "맞춤법 검사기", "네이버 맞춤법 검사기 기반\\n원고 교정")
+        self.scraper_card = FeatureCard(FluentIcon.DOCUMENT, "블로그 순위 체크", "키워드별 블로그 순위 탐색")
+        self.place_card = FeatureCard(getattr(FluentIcon, "POI", FluentIcon.SEARCH), "플레이스 순위 체크", "키워드별 플레이스 순위 탐색")
+        self.company_card = FeatureCard(FluentIcon.PEOPLE, "업체 리스트", "업체별 링크 관리, 휴진 체크")
+        self.index_card = FeatureCard(getattr(FluentIcon, "PIE_SINGLE", FluentIcon.DOCUMENT), "지수 체크(개발중)", "블로그 지수 분석 및 확인")
+        self.spell_card = FeatureCard(FluentIcon.EDIT, "맞춤법 검사기", "맞춤법 검사기")
         
         self.scraper_card.clicked.connect(lambda: self.main_window.switchTo(self.main_window.scraper_interface))
         self.place_card.clicked.connect(lambda: self.main_window.switchTo(self.main_window.place_scraper_interface))
