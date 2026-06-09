@@ -4381,15 +4381,40 @@ def perform_update(release_info):
         temp_dir = tempfile.gettempdir()
         new_exe_path = os.path.join(temp_dir, "new_app_temp.exe")
         
-        # Download new exe
-        exe_data = requests.get(exe_url).content
+        # Download new exe with progress
+        from PyQt5.QtWidgets import QProgressDialog, QApplication
+        from PyQt5.QtCore import Qt
+        
+        response = requests.get(exe_url, stream=True)
+        response.raise_for_status()
+        total_size = int(response.headers.get('content-length', 0))
+        
+        progress = QProgressDialog("업데이트 파일을 다운로드 중입니다...", "취소", 0, 100, None)
+        progress.setWindowTitle("업데이트 진행 중")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+        
+        downloaded = 0
         with open(new_exe_path, "wb") as f:
-            f.write(exe_data)
-            
+            for chunk in response.iter_content(chunk_size=8192):
+                if progress.wasCanceled():
+                    try: os.remove(new_exe_path)
+                    except: pass
+                    return
+                if chunk:
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if total_size > 0:
+                        progress.setValue(int((downloaded / total_size) * 100))
+                    QApplication.processEvents()
+                    
+        progress.setLabelText("파일 무결성을 검증 중입니다...")
+        QApplication.processEvents()
         # Download and check hash
         if sha_url:
             sha_data = requests.get(sha_url).text
-            expected_hash = sha_data.split()[0].strip().lower()
+            expected_hash = sha_data.split()[0].strip().lower().replace("sha256:", "")
             
             sha256_hash = hashlib.sha256()
             with open(new_exe_path, "rb") as f:
@@ -4420,7 +4445,7 @@ def perform_update(release_info):
 
 def check_for_updates(manual_check=False):
     try:
-        response = requests.get("https://api.github.com/repos/ks02149-star/program/releases/latest", timeout=5)
+        response = requests.get("https://api.github.com/repos/ks02149-star/test-2/releases/latest", timeout=5)
         response.raise_for_status()
         latest_release = response.json()
         latest_tag = latest_release.get("tag_name", "")
