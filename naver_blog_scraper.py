@@ -81,9 +81,12 @@ import configparser
 import time
 import re
 import random
+<<<<<<< HEAD
 import hashlib
 import ctypes
 import tempfile
+=======
+>>>>>>> 538e7f7cecadd9a6cbf45437a9bdd0bab537153b
 import concurrent.futures
 import threading
 
@@ -2391,7 +2394,11 @@ class HomeInterface(ScrollArea):
         self.header_left_layout.addWidget(self.icon_label)
         self.header_left_layout.addLayout(self.greeting_vbox)
         
+<<<<<<< HEAD
         self.version_label = QLabel(f"Program ver : {__version__}")
+=======
+        self.version_label = QLabel("Program ver : 2.0")
+>>>>>>> 538e7f7cecadd9a6cbf45437a9bdd0bab537153b
         self.version_label.setFont(QFont("SUIT", 12))
         self.version_label.setStyleSheet("color: rgba(255, 255, 255, 0.6); background: transparent;")
         self.version_label.setAlignment(Qt.AlignRight | Qt.AlignTop)
@@ -2530,6 +2537,7 @@ class SettingInterface(ScrollArea):
         # Title
         self.title_label = TitleLabel("설정", self.scroll_content)
         self.scroll_layout.addWidget(self.title_label)
+<<<<<<< HEAD
         self.scroll_layout.addSpacing(20)
         
         # Update Card
@@ -2546,6 +2554,8 @@ class SettingInterface(ScrollArea):
         self.update_layout.addWidget(self.update_btn)
         
         self.scroll_layout.addWidget(self.update_card)
+=======
+>>>>>>> 538e7f7cecadd9a6cbf45437a9bdd0bab537153b
         self.scroll_layout.addStretch(1)
 
 
@@ -4031,7 +4041,11 @@ class PlaceScraperWorker(QThread):
             
             options = Options()
             options.page_load_strategy = 'eager'
+<<<<<<< HEAD
             options.add_argument('--headless=new')
+=======
+            # options.add_argument('--headless')  # 테스트를 위해 주석 처리
+>>>>>>> 538e7f7cecadd9a6cbf45437a9bdd0bab537153b
             options.add_argument('--disable-gpu')
             options.add_argument('--no-sandbox')
             options.add_argument('--disable-dev-shm-usage')
@@ -4358,6 +4372,7 @@ class PlaceScraperInterface(QWidget):
         self.append_log("\n[안내] 순위 체크가 종료되었습니다.")
         InfoBar.success("완료", "플레이스 순위 체크 작업이 성공적으로 종료되었습니다.", duration=4000, position=InfoBarPosition.TOP, parent=self)
 
+<<<<<<< HEAD
 def parse_version(v):
     return tuple(map(int, re.findall(r'\d+', v)))
 
@@ -4443,6 +4458,8 @@ def check_for_updates(manual_check=False):
             from PyQt5.QtWidgets import QMessageBox
             QMessageBox.critical(None, "오류", f"업데이트 확인 중 오류가 발생했습니다:\n{str(e)}")
 
+=======
+>>>>>>> 538e7f7cecadd9a6cbf45437a9bdd0bab537153b
 class MainWindow(FluentWindow):
     def __init__(self):
         super().__init__()
@@ -4574,8 +4591,11 @@ if __name__ == '__main__':
     app_font = QFont(loaded_family, 10, QFont.Normal)
     app.setFont(app_font)
 
+<<<<<<< HEAD
     check_for_updates()
 
+=======
+>>>>>>> 538e7f7cecadd9a6cbf45437a9bdd0bab537153b
     window = MainWindow()
     window.show()
     sys.exit(app.exec_())
