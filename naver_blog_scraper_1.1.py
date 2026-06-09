@@ -2798,7 +2798,6 @@ class ScraperInterface(QWidget):
             self.append_log(f"[시스템] 'Workspace/{self.excel_filename}' 템플릿 파일이 생성되었습니다.")
         
         self.load_excel_sheets()
-        self.backup_excel()
 
         self.start_btn.setEnabled(False)
         self.open_excel_btn.setEnabled(False)
@@ -2886,6 +2885,8 @@ class ScraperInterface(QWidget):
             except Exception as e:
                 self.append_log(f"[오류] 엑셀 파일 접근 검사 실패: {e}")
                 return
+
+        self.backup_excel()
 
         self.start_btn.setEnabled(False)
         self.open_excel_btn.setEnabled(False)
@@ -4534,7 +4535,7 @@ class MainWindow(FluentWindow):
             self.setStyleSheet("MainWindow { background-color: #F3F3F3; }")
         
     def init_window(self):
-        self.setWindowTitle("푸름애드 블로그 관리 프로그램")
+        self.setWindowTitle("푸름애드 관리 프로그램")
         self.resize(1400, 800)
         
         desktop = QApplication.desktop().availableGeometry()
