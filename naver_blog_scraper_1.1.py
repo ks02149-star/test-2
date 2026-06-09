@@ -618,8 +618,23 @@ class DriverInitWorker(QThread):
 
     def run(self):
         try:
-            path = ChromeDriverManager().install()
-            self.finished.emit(path)
+            import os, re
+            from webdriver_manager.chrome import ChromeDriverManager
+            original_path = ChromeDriverManager().install()
+            
+            driver_dir = os.path.dirname(original_path)
+            patched_path = os.path.join(driver_dir, "chromedriver_patched.exe")
+            
+            if not os.path.exists(patched_path):
+                with open(original_path, 'rb') as f:
+                    binary_data = f.read()
+                
+                patched_binary = re.sub(b'cdc_[a-zA-Z0-9]{22}_', b'rnd_' + b'X' * 22 + b'_', binary_data)
+                
+                with open(patched_path, 'wb') as f:
+                    f.write(patched_binary)
+                    
+            self.finished.emit(patched_path)
         except Exception as e:
             self.error.emit(str(e))
 
@@ -655,6 +670,7 @@ class ScraperWorker(QThread):
             
             service = Service(self.global_driver_path)
             driver = webdriver.Chrome(service=service, options=options)
+            driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": "Object.defineProperty(navigator, \'webdriver\', { get: () => undefined })"})
             self.thread_local.driver = driver
             
             with self.driver_pool_lock:
@@ -690,7 +706,7 @@ class ScraperWorker(QThread):
                 )
             except TimeoutException:
                 self.log(f"[안내] '{keyword}' - 요소를 찾지 못해 대기 시간이 초과되었습니다.")
-                return pd.DataFrame({'블로그명': pd.Series(dtype='str'), '제목': pd.Series(dtype='str')})
+                return pd.DataFrame({'블로그명': pd.Series(dtype='str'), '제목': pd.Series(dtype='str')}), [], ""
 
             last_height = driver.execute_script("return document.body.scrollHeight")
             
@@ -712,14 +728,18 @@ class ScraperWorker(QThread):
                     break
                     
                 driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(0.5) 
                 
-                new_height = driver.execute_script("return document.body.scrollHeight")
-                if new_height == last_height:
-                    time.sleep(1.0) 
+                waited = 0
+                new_height = last_height
+                while waited < 2.0:
+                    time.sleep(0.2)
+                    waited += 0.2
                     new_height = driver.execute_script("return document.body.scrollHeight")
-                    if new_height == last_height:
-                        break 
+                    if new_height > last_height:
+                        break
+                        
+                if new_height == last_height:
+                    break
                 last_height = new_height
 
             js_extract = """
@@ -2962,6 +2982,7 @@ class StatsScraperWorker(QThread):
             
             service = Service(self.global_driver_path)
             self.driver = webdriver.Chrome(service=service, options=options)
+            self.driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": "Object.defineProperty(navigator, \'webdriver\', { get: () => undefined })"})
             
             self.status.emit("네이버 블로그 통계 페이지로 이동 중...")
             target_url = f"https://blog.stat.naver.com/blog/visitor/daily?blogId={self.blog_id}"
@@ -3826,6 +3847,43 @@ class PlaceScraperWorker(QThread):
     def log(self, message):
         self.signals.log.emit(message)
 
+    def get_patched_chromedriver(self):
+        import os, re
+        
+        if not self.global_driver_path or not os.path.exists(self.global_driver_path):
+            return None
+            
+        driver_dir = os.path.dirname(self.global_driver_path)
+        patched_path = os.path.join(driver_dir, "chromedriver_patched.exe")
+        
+        if os.path.exists(patched_path):
+            return patched_path
+            
+        try:
+            with open(self.global_driver_path, 'rb') as f:
+                binary_data = f.read()
+                
+            patched_binary = re.sub(b'cdc_[a-zA-Z0-9]{22}_', b'rnd_' + b'X' * 22 + b'_', binary_data)
+            
+            with open(patched_path, 'wb') as f:
+                f.write(patched_binary)
+                
+            return patched_path
+        except Exception as e:
+            self.log(f"[경고] 드라이버 패치 실패: {e} (원본 드라이버를 사용합니다.)")
+            return self.global_driver_path
+
+    def get_random_android_ua_and_size(self):
+        import random
+        pool = [
+            ("Mozilla/5.0 (Linux; Android 14; SM-S928N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.6478.122 Mobile Safari/537.36", "412,915"),
+            ("Mozilla/5.0 (Linux; Android 13; SM-A536N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.6422.113 Mobile Safari/537.36", "412,915"),
+            ("Mozilla/5.0 (Linux; Android 14; SM-F731N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.6367.113 Mobile Safari/537.36", "360,844"),
+            ("Mozilla/5.0 (Linux; Android 13; SM-G998N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.6312.118 Mobile Safari/537.36", "384,853"),
+            ("Mozilla/5.0 (Linux; Android 14; SM-S918N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.6478.122 Mobile Safari/537.36", "412,915")
+        ]
+        return random.choice(pool)
+
     def cleanup_drivers(self):
         if hasattr(self, 'driver_hospital') and self.driver_hospital:
             try:
@@ -3903,7 +3961,7 @@ class PlaceScraperWorker(QThread):
                         for(var k=0; k<links.length; k++) {
                             var a_text = links[k].innerText || "";
                             var first_line = a_text.trim().split('\\n')[0].trim();
-                            if(first_line.length > 0 && first_line.indexOf("이미지 수") === -1 && isNaN(first_line)) {
+                            if(first_line.length > 0 && first_line.indexOf("리뷰 ") === -1 && isNaN(first_line)) {
                                 foundTitle = true;
                                 break;
                             }
@@ -3921,20 +3979,28 @@ class PlaceScraperWorker(QThread):
                     break
                     
                 driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(1.0) 
                 
-                new_height = driver.execute_script("return document.body.scrollHeight")
+                # Smart Polling: 기다리지 않고 페이지 높이가 변할 때까지 최대 2초간 0.2초 간격으로 확인
+                waited = 0
+                new_height = last_height
+                while waited < 2.0:
+                    time.sleep(0.2)
+                    waited += 0.2
+                    new_height = driver.execute_script("return document.body.scrollHeight")
+                    if new_height > last_height:
+                        break
+                
                 if new_height == last_height:
                     retries += 1
                     driver.execute_script("window.scrollTo(0, document.body.scrollHeight - 500);")
-                    time.sleep(0.5)
+                    time.sleep(0.1)
                     driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                    time.sleep(2.0)
+                    time.sleep(0.5)
                     new_height = driver.execute_script("return document.body.scrollHeight")
                     
                     if new_height == last_height:
-                        if retries >= 3:
-                            break 
+                        if retries >= 2:  # 최대 재시도 2회로 단축
+                            break
                 else:
                     retries = 0
                 last_height = new_height
@@ -3997,10 +4063,10 @@ class PlaceScraperWorker(QThread):
                 titles.append(data)
                 
             if not titles:
-                self.log(f"[안내] '{keyword}' - 데이터를 추출하지 못했습니다.")
+                self.log(f"[안내] '{self.keyword}' - 데이터를 추출하지 못했습니다.")
                         
         except Exception as e:
-            self.log(f"[오류] '{keyword}' - 크롤링 실패: {e}")
+            self.log(f"[오류] '{self.keyword}' - 크롤링 실패: {e}")
                 
         df = pd.DataFrame({'제목': titles})
         df.index = df.index + 1
@@ -4029,26 +4095,68 @@ class PlaceScraperWorker(QThread):
 
             self.log(f"=== 키워드: '{self.keyword}', 목표 업체명: '{self.target_company}' ===")
             
-            delay_time = random.uniform(2.5, 4.5)
+            delay_time = random.uniform(0.3, 0.7)
             self.log(f"※ 봇 탐지 우회를 위해 {delay_time:.1f}초 대기 중...")
             time.sleep(delay_time)
             
-            options = Options()
-            options.page_load_strategy = 'eager'
-            # 테스트를 위해 백그라운드 숨김 처리 주석
-            # options.add_argument('--headless=new')
-            options.add_argument('--disable-gpu')
-            options.add_argument('--no-sandbox')
-            options.add_argument('--disable-dev-shm-usage')
-            options.add_argument('--window-size=390,844')
-            options.add_argument('user-agent=Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1')
-            options.add_argument('--disable-blink-features=AutomationControlled')
+            patched_driver_path = self.get_patched_chromedriver()
+            if not patched_driver_path:
+                self.signals.error.emit("크롬 드라이버를 찾을 수 없거나 패치할 수 없습니다.")
+                return
+
+            # 공통 크롬 옵션 (봇 탐지 회피용)
+            base_options = Options()
+            base_options.page_load_strategy = 'eager'
+            # 백그라운드 숨김 처리 옵션 복원 (테스트 완료)
+            base_options.add_argument('--headless=new')
+            base_options.add_argument('--disable-gpu')
+            base_options.add_argument('--no-sandbox')
+            base_options.add_argument('--disable-dev-shm-usage')
+            base_options.add_argument('--disable-blink-features=AutomationControlled')
+            base_options.add_experimental_option('excludeSwitches', ['enable-automation'])
+            base_options.add_experimental_option('useAutomationExtension', False)
             
-            service1 = Service(self.global_driver_path)
-            self.driver_hospital = webdriver.Chrome(service=service1, options=options)
+            # CDP를 이용해 자바스크립트 변수 은닉 (navigator.webdriver 지우기)
+            cdp_script = "Object.defineProperty(navigator, 'webdriver', { get: () => undefined })"
+
+            # ---------------------------------------------
+            # 첫 번째 드라이버 (병원) 세팅
+            # ---------------------------------------------
+            ua_h, size_h = self.get_random_android_ua_and_size()
+            options_h = Options()
+            for arg in base_options.arguments:
+                options_h.add_argument(arg)
+            for key, val in base_options.experimental_options.items():
+                options_h.add_experimental_option(key, val)
+                
+            options_h.add_argument(f"user-agent={ua_h}")
+            options_h.add_argument(f"--window-size={size_h}")
             
-            service2 = Service(self.global_driver_path)
-            self.driver_place = webdriver.Chrome(service=service2, options=options)
+            service_h = Service(patched_driver_path)
+            self.driver_hospital = webdriver.Chrome(service=service_h, options=options_h)
+            self.driver_hospital.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {'source': cdp_script})
+            
+            # 봇 탐지 방지 지연
+            delay_between_browsers = random.uniform(0.2, 0.5)
+            self.log(f"※ 브라우저 연속 실행에 따른 봇 탐지 방지를 위해 {delay_between_browsers:.1f}초 대기 중...")
+            time.sleep(delay_between_browsers)
+            
+            # ---------------------------------------------
+            # 두 번째 드라이버 (일반 플레이스) 세팅
+            # ---------------------------------------------
+            ua_p, size_p = self.get_random_android_ua_and_size()
+            options_p = Options()
+            for arg in base_options.arguments:
+                options_p.add_argument(arg)
+            for key, val in base_options.experimental_options.items():
+                options_p.add_experimental_option(key, val)
+                
+            options_p.add_argument(f"user-agent={ua_p}")
+            options_p.add_argument(f"--window-size={size_p}")
+            
+            service_p = Service(patched_driver_path)
+            self.driver_place = webdriver.Chrome(service=service_p, options=options_p)
+            self.driver_place.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {'source': cdp_script})
             
             import urllib.parse
             import concurrent.futures
@@ -4076,7 +4184,7 @@ class PlaceScraperWorker(QThread):
             with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
                 future_to_label = {
                     executor.submit(self.get_place_data_by_url, self.driver_hospital, url_hospital, "병원", 0): 'hospital',
-                    executor.submit(self.get_place_data_by_url, self.driver_place, url_place, "일반 플레이스", 1.5): 'place'
+                    executor.submit(self.get_place_data_by_url, self.driver_place, url_place, "일반 플레이스", 0.5): 'place'
                 }
                 
                 results = {}
