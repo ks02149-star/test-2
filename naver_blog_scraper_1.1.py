@@ -3827,34 +3827,29 @@ class PlaceScraperWorker(QThread):
         self.signals.log.emit(message)
 
     def cleanup_drivers(self):
-        if self.driver:
+        if hasattr(self, 'driver_hospital') and self.driver_hospital:
             try:
-                self.driver.quit()
+                self.driver_hospital.quit()
             except:
                 pass
-            self.driver = None
+            self.driver_hospital = None
+            
+        if hasattr(self, 'driver_place') and self.driver_place:
+            try:
+                self.driver_place.quit()
+            except:
+                pass
+            self.driver_place = None
 
-    def get_place_data_by_crawling(self, driver, keyword, target_company):
+    def get_place_data_by_url(self, driver, url, label, delay=0):
+        if delay > 0:
+            time.sleep(delay)
+            
         titles = []
         
-        self.log(f"▶ '{keyword}' - 데이터 탐색 중... ({self.display_count}개 목표)")
+        self.log(f"▶ '{self.keyword}' - {label} 카테고리 데이터 탐색 중... ({self.display_count}개 목표)")
         
         try:
-            departments = [
-                "이비인후과", "마취통증의학과", "정신건강의학과", "소아청소년과", 
-                "재활의학과", "가정의학과", "성형외과", "정형외과", "신경외과", 
-                "피부과", "산부인과", "비뇨기과", "통증의학과", "신경과", 
-                "안과", "치과", "내과", "외과", "소아과", "한의원", "의원", "한방병원", "병원"
-            ]
-            dept = keyword
-            for d in departments:
-                if d in keyword:
-                    dept = d
-                    break
-            
-            q = urllib.parse.quote(keyword)
-            d_q = urllib.parse.quote(dept)
-            url = f"https://m.place.naver.com/hospital/list?query={q}&department={d_q}&x=126.9783882&y=37.5666103&level=top&entry=pll&originalQuery={q}"
             driver.get(url)
             
             try:
@@ -3862,11 +3857,11 @@ class PlaceScraperWorker(QThread):
                     EC.presence_of_element_located((By.CSS_SELECTOR, "li"))
                 )
             except TimeoutException:
-                self.log(f"[안내] '{keyword}' - 요소를 찾지 못해 대기 시간이 초과되었습니다.")
+                self.log(f"[안내] '{self.keyword}' - {label} 목록을 찾을 수 없거나 시간이 초과되었습니다.")
                 return pd.DataFrame({'제목': pd.Series(dtype='str')})
 
             last_height = driver.execute_script("return document.body.scrollHeight")
-            
+            retries = 0
             while True:
                 js_count = """
                 var els = document.querySelectorAll("li");
@@ -3926,14 +3921,22 @@ class PlaceScraperWorker(QThread):
                     break
                     
                 driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(0.5) 
+                time.sleep(1.0) 
                 
                 new_height = driver.execute_script("return document.body.scrollHeight")
                 if new_height == last_height:
-                    time.sleep(1.0) 
+                    retries += 1
+                    driver.execute_script("window.scrollTo(0, document.body.scrollHeight - 500);")
+                    time.sleep(0.5)
+                    driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                    time.sleep(2.0)
                     new_height = driver.execute_script("return document.body.scrollHeight")
+                    
                     if new_height == last_height:
-                        break 
+                        if retries >= 3:
+                            break 
+                else:
+                    retries = 0
                 last_height = new_height
 
             js_extract = """
@@ -4032,7 +4035,8 @@ class PlaceScraperWorker(QThread):
             
             options = Options()
             options.page_load_strategy = 'eager'
-            options.add_argument('--headless=new')
+            # 테스트를 위해 백그라운드 숨김 처리 주석
+            # options.add_argument('--headless=new')
             options.add_argument('--disable-gpu')
             options.add_argument('--no-sandbox')
             options.add_argument('--disable-dev-shm-usage')
@@ -4040,10 +4044,60 @@ class PlaceScraperWorker(QThread):
             options.add_argument('user-agent=Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1')
             options.add_argument('--disable-blink-features=AutomationControlled')
             
-            service = Service(self.global_driver_path)
-            self.driver = webdriver.Chrome(service=service, options=options)
+            service1 = Service(self.global_driver_path)
+            self.driver_hospital = webdriver.Chrome(service=service1, options=options)
             
-            df_sim = self.get_place_data_by_crawling(self.driver, self.keyword, self.target_company)
+            service2 = Service(self.global_driver_path)
+            self.driver_place = webdriver.Chrome(service=service2, options=options)
+            
+            import urllib.parse
+            import concurrent.futures
+            
+            departments = [
+                "이비인후과", "마취통증의학과", "정신건강의학과", "소아청소년과", 
+                "재활의학과", "가정의학과", "성형외과", "정형외과", "신경외과", 
+                "피부과", "산부인과", "비뇨기과", "통증의학과", "신경과", 
+                "안과", "치과", "내과", "외과", "소아과", "한의원", "의원", "한방병원", "병원"
+            ]
+            dept = self.keyword
+            for d in departments:
+                if d in self.keyword:
+                    dept = d
+                    break
+            
+            q = urllib.parse.quote(self.keyword)
+            d_q = urllib.parse.quote(dept)
+            
+            url_hospital = f"https://m.place.naver.com/hospital/list?query={q}&department={d_q}&x=126.9783882&y=37.5666103&level=top&entry=pll&originalQuery={q}"
+            url_place = f"https://m.place.naver.com/place/list?query={q}&x=126.9783882&y=37.5666103&start=1&display=100&adult=false&deviceType=mobile&sessionId=dxF1wii6ikGt4t96FvdHJS4k&level=top&entry=pll"
+
+            df_sim = pd.DataFrame({'제목': pd.Series(dtype='str')})
+            
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                future_to_label = {
+                    executor.submit(self.get_place_data_by_url, self.driver_hospital, url_hospital, "병원", 0): 'hospital',
+                    executor.submit(self.get_place_data_by_url, self.driver_place, url_place, "일반 플레이스", 1.5): 'place'
+                }
+                
+                results = {}
+                for future in concurrent.futures.as_completed(future_to_label):
+                    label = future_to_label[future]
+                    try:
+                        res_df = future.result()
+                        if not res_df.empty:
+                            results[label] = res_df
+                    except Exception as e:
+                        pass
+                
+                if 'hospital' in results and not results['hospital'].empty:
+                    df_sim = results['hospital']
+                    self.log(f"[안내] 병원 카테고리 검색 결과를 최종 채택합니다.")
+                elif 'place' in results and not results['place'].empty:
+                    df_sim = results['place']
+                    self.log(f"[안내] 병원 카테고리 누락으로, 일반 플레이스 검색 결과를 최종 채택합니다.")
+                else:
+                    self.log(f"[안내] '{self.keyword}' - 병원 및 일반 장소 모두에서 검색 결과를 찾지 못했습니다.")
+
             sim_rank = self.get_rank_string(df_sim, self.target_company)
             
             ranks = []
