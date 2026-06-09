@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "C:\Users\k0214\Desktop\test 2\naver_blog_scraper (ver.2).py", line 3917, in <module>
+    window = MainWindow()
+  File "C:\Users\k0214\Desktop\test 2\naver_blog_scraper (ver.2).py", line 3803, in __init__
+    self.home_interface = HomeInterface(self)
+                          ~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\k0214\Desktop\test 2\naver_blog_scraper (ver.2).py", line 2445, in __init__
+    self.news_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+                                      ^^^^^^^^^^^
+NameError: name 'QSizePolicy' is not defined

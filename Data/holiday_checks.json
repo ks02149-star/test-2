@@ -1,0 +1,28 @@
+{
+    "2026-06-08": {
+        "울산청맥외과": {
+            "place_checked": true,
+            "place_reason": "",
+            "popup_checked": true,
+            "popup_reason": ""
+        },
+        "테스트2": {
+            "place_checked": true,
+            "place_reason": "테스트",
+            "popup_checked": true,
+            "popup_reason": ""
+        },
+        "테스트3": {
+            "place_checked": true,
+            "place_reason": "",
+            "popup_checked": true,
+            "popup_reason": "테스트"
+        },
+        "테스트4": {
+            "place_checked": true,
+            "place_reason": "",
+            "popup_checked": true,
+            "popup_reason": ""
+        }
+    }
+}
