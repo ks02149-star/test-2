@@ -24,5 +24,31 @@
             "popup_checked": true,
             "popup_reason": ""
         }
+    },
+    "2026-06-09": {
+        "테스트2": {
+            "place_checked": true,
+            "place_reason": "",
+            "popup_checked": true,
+            "popup_reason": ""
+        },
+        "테스트3": {
+            "place_checked": true,
+            "place_reason": "",
+            "popup_checked": true,
+            "popup_reason": ""
+        },
+        "테스트 5": {
+            "place_checked": true,
+            "place_reason": "",
+            "popup_checked": true,
+            "popup_reason": ""
+        },
+        "테스트 7": {
+            "place_checked": true,
+            "place_reason": "",
+            "popup_checked": true,
+            "popup_reason": ""
+        }
     }
 }
