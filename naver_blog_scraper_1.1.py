@@ -1,4 +1,4 @@
-﻿import sys
+import sys
 import traceback
 import subprocess
 import os
@@ -110,9 +110,10 @@ os.environ['WDM_LOG'] = '0'
 os.environ['WDM_LOG_LEVEL'] = '0'
 
 import json
+import hashlib
 import winreg
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject, QUrl, QDate
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QMessageBox, QDialog, QFrame, QLabel, QCalendarWidget, QPushButton, QFileDialog, QSizePolicy
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject, QUrl, QDate, QPropertyAnimation, QEasingCurve, QRect
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QMessageBox, QDialog, QFrame, QLabel, QStackedWidget, QGraphicsDropShadowEffect, QCalendarWidget, QPushButton, QFileDialog, QSizePolicy
 from PyQt5.QtGui import QFont, QFontDatabase, QDesktopServices, QTextCharFormat, QColor, QBrush
 try:
     from PyQt5.QtWebEngineWidgets import QWebEngineView
@@ -123,11 +124,68 @@ from qfluentwidgets import (PushButton, PrimaryPushButton, ComboBox, SpinBox, Sw
                             IndeterminateProgressRing, FluentWindow, FluentIcon, LineEdit,
                             TransparentToolButton, ScrollArea, CardWidget, MessageBox,
                             setThemeColor, NavigationItemPosition, qconfig, isDarkTheme,
-                            BodyLabel, IconWidget, HyperlinkButton)
+                            BodyLabel, IconWidget, HyperlinkButton, PasswordLineEdit, CheckBox)
 import datetime
 import requests
 from bs4 import BeautifulSoup
 from PyQt5.QtWidgets import QGridLayout
+
+# --- Global Session ---
+SESSION = {
+    "id": None,
+    "name": None
+}
+# ----------------------
+
+# --- Monkey patch qfluentwidgets CalendarView to start on Sunday ---
+import qfluentwidgets.components.date_time.calendar_view as cv
+
+orig_init = cv.DayScrollView.__init__
+
+def new_init(self, parent=None):
+    orig_init(self, parent)
+    self.weekDays = [self.tr('Su'), self.tr('Mo'), self.tr('Tu'), self.tr('We'),
+                     self.tr('Th'), self.tr('Fr'), self.tr('Sa')]
+    while self.weekDayLayout.count():
+        item = self.weekDayLayout.takeAt(0)
+        if item.widget():
+            item.widget().deleteLater()
+    for day in self.weekDays:
+        label = cv.QLabel(day)
+        label.setObjectName('weekDayLabel')
+        self.weekDayLayout.addWidget(label, 1, cv.Qt.AlignHCenter)
+
+def new_initItems(self):
+    self.clear()
+    startDate = cv.QDate(self.minYear, 1, 1)
+    endDate = cv.QDate(self.maxYear, 12, 31)
+    currentDate = startDate
+
+    bias = currentDate.dayOfWeek() % 7
+    for i in range(bias):
+        item = cv.QListWidgetItem(self)
+        item.setFlags(cv.Qt.NoItemFlags)
+        self.addItem(item)
+
+    items, dates = [], []
+    while currentDate <= endDate:
+        items.append(str(currentDate.day()))
+        dates.append(cv.QDate(currentDate))
+        currentDate = currentDate.addDays(1)
+        
+    self.addItems(items)
+    for i, date in enumerate(dates):
+        self.item(i + bias).setData(cv.Qt.UserRole, date)
+
+def new_dateToRow(self, date: cv.QDate):
+    startDate = cv.QDate(self.minYear, 1, 1)
+    days = startDate.daysTo(date)
+    return days + (startDate.dayOfWeek() % 7)
+
+cv.DayScrollView.__init__ = new_init
+cv.DayScrollView._initItems = new_initItems
+cv.DayCalendarView._dateToRow = new_dateToRow
+# -------------------------------------------------------------------
 
 # --- [신설] macOS 스타일 내비게이션 바 하이라이트 패치 ---
 from PyQt5.QtCore import QRect, QRectF, QPoint, QMargins
@@ -2651,6 +2709,7 @@ class HomeInterface(ScrollArea):
         today_schedules = []
         for row in schedules:
             if len(row) >= 3 and row[0].strip() == today_str:
+                # row is [date, text, color, creator_id]
                 today_schedules.append((row[1].strip(), row[2]))
         
         holidays = data.get('holidays', {})
@@ -4792,7 +4851,7 @@ class ScheduleFetchThread(QThread):
             
             import urllib.parse
             sort_range = urllib.parse.quote('정렬기준!A:A')
-            url = f'https://sheets.googleapis.com/v4/spreadsheets/{self.spreadsheet_id}?includeGridData=true&ranges={self.sheet_name}!A:B&ranges=holidays!A:B&ranges={sort_range}'
+            url = f'https://sheets.googleapis.com/v4/spreadsheets/{self.spreadsheet_id}?includeGridData=true&ranges={self.sheet_name}!A:C&ranges=holidays!A:B&ranges={sort_range}'
             res = client.http_client.request('get', url)
             
             if res.status_code != 200:
@@ -4824,7 +4883,10 @@ class ScheduleFetchThread(QThread):
                         else:
                             color_hex = '#ffffff' 
                     
-                    parsed_data.append([date_val, text_val, color_hex])
+                    creator_id = ''
+                    if len(row['values']) >= 3:
+                        creator_id = row['values'][2].get('formattedValue', '')
+                    parsed_data.append([date_val, text_val, color_hex, creator_id])
             
             holidays_grid = sheets[1].get('data', [{}])[0].get('rowData', []) if len(sheets) > 1 else []
             parsed_holidays = {}
@@ -4866,25 +4928,80 @@ class ScheduleFetchThread(QThread):
             self.error_occurred.emit(str(e))
 
 
+
+class ScheduleItemWidget(QFrame):
+    delete_requested = pyqtSignal(str, str)
+    
+    def __init__(self, date_str, text, color, text_color, creator_id=None):
+        super().__init__()
+        self.date_str = date_str
+        self.raw_text = text
+        self.creator_id = creator_id
+        self.setStyleSheet(f"background-color: {color}; color: {text_color}; border-radius: 4px;")
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(6, 1, 6, 1)
+        
+        self.lbl = BodyLabel(text)
+        self.lbl.setStyleSheet(f"color: {text_color}; font-size: 11px; font-weight: bold; background: transparent; border: none;")
+        layout.addWidget(self.lbl)
+        
+    def contextMenuEvent(self, event):
+        from qfluentwidgets import RoundMenu, Action, InfoBar, InfoBarPosition
+        from PyQt5.QtCore import QTimer
+        
+        global SESSION
+        my_id = str(SESSION.get("id") or "").strip()
+        c_id = str(self.creator_id or "").strip()
+        if not my_id or my_id != c_id:
+            return
+
+        menu = RoundMenu(parent=self)
+        delete_action = Action(FluentIcon.DELETE, '삭제', self)
+        delete_action.triggered.connect(lambda: QTimer.singleShot(0, lambda: self.delete_requested.emit(self.date_str, self.raw_text)))
+        menu.addAction(delete_action)
+        menu.exec(event.globalPos())
+
 class ScheduleAddDialog(QDialog):
     def __init__(self, date_str, parent=None):
         super().__init__(parent)
         self.date_str = date_str
         self.setWindowTitle(f"일정 추가 - {date_str}")
-        self.setFixedSize(300, 150)
+        self.setFixedSize(350, 240)
         
-        from qfluentwidgets import isDarkTheme
+        from qfluentwidgets import isDarkTheme, CalendarPicker
+        from PyQt5.QtCore import QDate
         is_dark = isDarkTheme()
         bg_color = "#2b2b2b" if is_dark else "#ffffff"
         self.setStyleSheet(f"QDialog {{ background-color: {bg_color}; }}")
         
         layout = QVBoxLayout(self)
         
-        self.title_label = SubtitleLabel(f"{date_str} 일정 추가")
+        self.title_label = SubtitleLabel("일정 추가")
         layout.addWidget(self.title_label)
         
+        date_layout = QHBoxLayout()
+        self.start_picker = CalendarPicker()
+        self.end_picker = CalendarPicker()
+        
+        y, m, d = map(int, date_str.split('-'))
+        initial_date = QDate(y, m, d)
+        self.start_picker.setDate(initial_date)
+        self.end_picker.setDate(initial_date)
+        
+        start_lbl = BodyLabel("시작:")
+        end_lbl = BodyLabel("종료:")
+        
+        date_layout.addWidget(start_lbl)
+        date_layout.addWidget(self.start_picker)
+        date_layout.addStretch(1)
+        date_layout.addWidget(end_lbl)
+        date_layout.addWidget(self.end_picker)
+        
+        layout.addLayout(date_layout)
+        
         self.input_edit = LineEdit()
-        self.input_edit.setPlaceholderText("예: OOO 연차")
+        self.input_edit.setPlaceholderText("예: OOO 미팅")
         layout.addWidget(self.input_edit)
         
         btn_layout = QHBoxLayout()
@@ -4898,8 +5015,17 @@ class ScheduleAddDialog(QDialog):
         self.save_btn.clicked.connect(self.accept)
         self.cancel_btn.clicked.connect(self.reject)
         
-    def get_schedule_text(self):
-        return self.input_edit.text().strip()
+    def get_schedule_data(self):
+        start_qdate = self.start_picker.getDate()
+        end_qdate = self.end_picker.getDate()
+        
+        start_str = f"{start_qdate.year()}-{start_qdate.month():02d}-{start_qdate.day():02d}"
+        end_str = f"{end_qdate.year()}-{end_qdate.month():02d}-{end_qdate.day():02d}"
+        
+        if start_str > end_str:
+            start_str, end_str = end_str, start_str
+            
+        return start_str, end_str, self.input_edit.text().strip()
 
 
 class ScheduleInterface(ScrollArea):
@@ -4968,7 +5094,7 @@ class ScheduleInterface(ScrollArea):
         for i in reversed(range(self.calendar_grid.count())): 
             widget = self.calendar_grid.itemAt(i).widget()
             if widget:
-                widget.setParent(None)
+                widget.deleteLater()
                 
         year = self.year_combo.currentData()
         month = self.month_combo.currentData()
@@ -5012,11 +5138,15 @@ class ScheduleInterface(ScrollArea):
             
             schedules = self.schedule_data.get(date_str, [])
             for sch_data in schedules:
-                if isinstance(sch_data, tuple):
+                if isinstance(sch_data, tuple) and len(sch_data) >= 3:
+                    sch, color, creator_id = sch_data[0], sch_data[1], sch_data[2]
+                elif isinstance(sch_data, tuple) and len(sch_data) == 2:
                     sch, color = sch_data
+                    creator_id = None
                 else:
                     sch = sch_data
                     color = "#1976D2"
+                    creator_id = None
                 
                 try:
                     r = int(color[1:3], 16)
@@ -5027,15 +5157,14 @@ class ScheduleInterface(ScrollArea):
                 except:
                     text_color = "#000000"
                     
-                sch_lbl = QLabel(sch)
-                sch_lbl.setStyleSheet(f"background-color: {color}; color: {text_color}; border-radius: 3px; padding: 4px; border: none; font-size: 12px; font-weight: bold;")
-                sch_lbl.setWordWrap(True)
+                sch_lbl = ScheduleItemWidget(date_str, sch, color, text_color, creator_id)
+                sch_lbl.delete_requested.connect(self.delete_schedule)
                 cell_layout.addWidget(sch_lbl)
                 
             cell_layout.addStretch(1)
             cell_widget.setMinimumHeight(120)
             
-            cell_widget.mouseDoubleClickEvent = lambda event, ds=date_str: self.on_cell_double_clicked(ds)
+            cell_widget.mouseDoubleClickEvent = lambda event, ds=date_str: self.on_cell_double_clicked(ds) if event.button() == Qt.LeftButton else None
             
             self.calendar_grid.addWidget(cell_widget, row, col)
             col += 1
@@ -5046,17 +5175,35 @@ class ScheduleInterface(ScrollArea):
     def on_cell_double_clicked(self, date_str):
         dialog = ScheduleAddDialog(date_str, self)
         if dialog.exec_():
-            text = dialog.get_schedule_text()
+            start_str, end_str, text = dialog.get_schedule_data()
             if text:
                 # Add locally for instant feedback
-                if date_str not in self.schedule_data:
-                    self.schedule_data[date_str] = []
-                self.schedule_data[date_str].append((text, "#1976D2"))
+                from datetime import datetime, timedelta
+                start = datetime.strptime(start_str, "%Y-%m-%d")
+                end = datetime.strptime(end_str, "%Y-%m-%d")
+                current = start
+                while current <= end:
+                    ds = current.strftime("%Y-%m-%d")
+                    if ds not in self.schedule_data:
+                        self.schedule_data[ds] = []
+                    global SESSION
+                    self.schedule_data[ds].append((text, "#1976D2", SESSION.get("id")))
+                    current += timedelta(days=1)
+                    
                 self.build_calendar()
                 # Run thread to add to remote
-                self.add_thread = ScheduleAddThread(date_str, text)
+                self.add_thread = ScheduleAddThread(start_str, end_str, text, SESSION.get("id"))
                 self.add_thread.error_occurred.connect(self.on_error_occurred)
                 self.add_thread.start()
+
+    def delete_schedule(self, date_str, text):
+        # Run thread to delete from remote
+        global SESSION
+        self.del_thread = ScheduleDeleteThread(date_str, text, SESSION.get("id"))
+        self.del_thread.error_occurred.connect(lambda err: InfoBar.error("삭제 실패", err, parent=self, position=InfoBarPosition.TOP))
+        self.del_thread.success.connect(lambda: InfoBar.success("삭제 성공", "일정이 성공적으로 삭제되었습니다.", parent=self, position=InfoBarPosition.TOP))
+        self.del_thread.success.connect(self.trigger_refresh)
+        self.del_thread.start()
 
     def go_to_today(self):
         from datetime import date
@@ -5077,14 +5224,15 @@ class ScheduleInterface(ScrollArea):
         self.schedule_data.clear()
         self.holidays_data = data.get('holidays', {})
         for i, row in enumerate(data.get('schedules', [])):
-            if i == 0 or len(row) < 3: continue
+            if len(row) < 3 or row[0].strip() == '날짜' or row[0].strip() == 'Date': continue
             d_str = row[0].strip()
             sch = row[1].strip()
             color = row[2]
+            creator_id = row[3] if len(row) >= 4 else ""
             if d_str and sch:
                 if d_str not in self.schedule_data:
                     self.schedule_data[d_str] = []
-                self.schedule_data[d_str].append((sch, color))
+                self.schedule_data[d_str].append((sch, color, creator_id))
         self.build_calendar()
 
     def on_error_occurred(self, err):
@@ -5093,29 +5241,496 @@ class ScheduleInterface(ScrollArea):
 class ScheduleAddThread(QThread):
     error_occurred = pyqtSignal(str)
     
-    def __init__(self, date_str, text, spreadsheet_id="1wWLxMTY3D5urtn0gomepgA1blQnyz05BUi2wepWBTDk", sheet_name="schedule"):
+    def __init__(self, start_date, end_date, text, creator_id, spreadsheet_id="1wWLxMTY3D5urtn0gomepgA1blQnyz05BUi2wepWBTDk", sheet_name="schedule"):
+        super().__init__()
+        self.start_date = start_date
+        self.end_date = end_date
+        self.text = text
+        self.creator_id = creator_id
+        self.spreadsheet_id = spreadsheet_id
+        self.sheet_name = sheet_name
+        
+    def run(self):
+        try:
+            import os, sys
+            base_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
+            creds_path = os.path.join(base_dir, "Workspace", "credentials.json")
+            if not os.path.exists(creds_path):
+                self.error_occurred.emit("credentials.json 을 찾을 수 없습니다.")
+                return
+
+            import gspread
+            from oauth2client.service_account import ServiceAccountCredentials
+            scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+            creds = ServiceAccountCredentials.from_json_keyfile_name(creds_path, scope)
+            client = gspread.authorize(creds)
+            
+            sheet = client.open_by_key(self.spreadsheet_id).worksheet(self.sheet_name)
+            
+            from datetime import datetime, timedelta
+            start = datetime.strptime(self.start_date, "%Y-%m-%d")
+            end = datetime.strptime(self.end_date, "%Y-%m-%d")
+            
+            rows_to_add = []
+            current = start
+            while current <= end:
+                rows_to_add.append([current.strftime("%Y-%m-%d"), self.text, self.creator_id])
+                current += timedelta(days=1)
+                
+            if len(rows_to_add) > 1:
+                sheet.append_rows(rows_to_add)
+            elif len(rows_to_add) == 1:
+                sheet.append_row(rows_to_add[0])
+                
+        except Exception as e:
+            self.error_occurred.emit(str(e))
+
+class ScheduleDeleteThread(QThread):
+    error_occurred = pyqtSignal(str)
+    success = pyqtSignal()
+    
+    def __init__(self, date_str, text, creator_id, spreadsheet_id="1wWLxMTY3D5urtn0gomepgA1blQnyz05BUi2wepWBTDk", sheet_name="schedule"):
         super().__init__()
         self.date_str = date_str
         self.text = text
+        self.creator_id = creator_id
         self.spreadsheet_id = spreadsheet_id
         self.sheet_name = sheet_name
+        
+    def run(self):
+        try:
+            import os, sys
+            base_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
+            creds_path = os.path.join(base_dir, "Workspace", "credentials.json")
+            if not os.path.exists(creds_path):
+                self.error_occurred.emit("credentials.json 을 찾을 수 없습니다.")
+                return
+
+            import gspread
+            from oauth2client.service_account import ServiceAccountCredentials
+            scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+            creds = ServiceAccountCredentials.from_json_keyfile_name(creds_path, scope)
+            client = gspread.authorize(creds)
+            
+            sheet = client.open_by_key(self.spreadsheet_id).worksheet(self.sheet_name)
+            
+            records = sheet.get_all_values()
+            found_index = -1
+            for i, row in enumerate(records):
+                if len(row) >= 3 and row[0] == self.date_str and row[1] == self.text and row[2] == self.creator_id:
+                    found_index = i + 1  # 1-indexed for gspread
+                    break
+                    
+            if found_index != -1:
+                sheet.delete_rows(found_index)
+                self.success.emit()
+            else:
+                self.error_occurred.emit("삭제할 일정을 구글 시트에서 찾을 수 없습니다.")
+                
+        except Exception as e:
+            self.error_occurred.emit(str(e))
+
+class LoginThread(QThread):
+    success = pyqtSignal(dict)
+    error = pyqtSignal(str)
+    signup_success = pyqtSignal(str)
+    
+    def __init__(self, mode, user_id, password, name="", spreadsheet_id="1wWLxMTY3D5urtn0gomepgA1blQnyz05BUi2wepWBTDk"):
+        super().__init__()
+        self.mode = mode
+        self.user_id = user_id
+        self.password = password
+        self.name = name
+        self.spreadsheet_id = spreadsheet_id
         
     def run(self):
         try:
             base_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
             creds_path = os.path.join(base_dir, "Workspace", "credentials.json")
             if not os.path.exists(creds_path):
-                self.error_occurred.emit("credentials.json 파일을 찾을 수 없습니다.")
+                self.error.emit("credentials.json 파일을 찾을 수 없습니다.")
                 return
 
             scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
             creds = ServiceAccountCredentials.from_json_keyfile_name(creds_path, scope)
             client = gspread.authorize(creds)
             
-            sheet = client.open_by_key(self.spreadsheet_id).worksheet(self.sheet_name)
-            sheet.append_row([self.date_str, self.text])
+            try:
+                sheet = client.open_by_key(self.spreadsheet_id).worksheet("users")
+            except gspread.exceptions.WorksheetNotFound:
+                self.error.emit("스프레드시트에 'users' 탭이 없습니다.")
+                return
+            
+            records = sheet.get_all_values()
+            
+            # Hash password
+            hashed_pw = hashlib.sha256(self.password.encode('utf-8')).hexdigest()
+            
+            if self.mode == "auto_login":
+                for row in records[1:]:
+                    if len(row) >= 3:
+                        r_id, r_pw, r_name = row[0], row[1], row[2]
+                        if r_id == self.user_id and r_pw == self.password:
+                            self.success.emit({"id": r_id, "name": r_name})
+                            return
+                self.error.emit("자동 로그인 실패")
+                return
+
+            if self.mode == "login":
+                for row in records[1:]: # Skip header
+                    if len(row) >= 3:
+                        r_id, r_pw, r_name = row[0], row[1], row[2]
+                        if r_id == self.user_id:
+                            if r_pw == hashed_pw:
+                                self.success.emit({"id": r_id, "name": r_name})
+                                return
+                            else:
+                                self.error.emit("비밀번호가 일치하지 않습니다.")
+                                return
+                self.error.emit("존재하지 않는 아이디입니다.")
+                
+            elif self.mode == "signup":
+                for row in records[1:]:
+                    if len(row) >= 1 and row[0] == self.user_id:
+                        self.error.emit("이미 존재하는 아이디입니다.")
+                        return
+                
+                sheet.append_row([self.user_id, hashed_pw, self.name])
+                self.signup_success.emit("회원가입이 완료되었습니다. 로그인해주세요.")
+                
         except Exception as e:
-            self.error_occurred.emit(str(e))
+            self.error.emit(str(e))
+
+class LoginDialog(QDialog):
+    login_success = pyqtSignal(dict)
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowSystemMenuHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setFixedSize(850, 550)
+        
+        # Load auto-login settings
+        self.base_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
+        self.settings_path = os.path.join(self.base_dir, "Workspace", "settings.json")
+        self.auto_login_data = None
+        self.load_settings()
+        
+        self.init_ui()
+        
+        # Check auto-login
+        if self.auto_login_data and self.auto_login_data.get("auto_login"):
+            self.do_auto_login()
+
+    def load_settings(self):
+        if os.path.exists(self.settings_path):
+            try:
+                with open(self.settings_path, 'r', encoding='utf-8') as f:
+                    self.auto_login_data = json.load(f)
+            except:
+                pass
+
+    def save_settings(self, user_id, hashed_pw, auto_login):
+        data = {}
+        if os.path.exists(self.settings_path):
+            try:
+                with open(self.settings_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+            except:
+                pass
+        data["auto_login"] = auto_login
+        if auto_login:
+            data["saved_id"] = user_id
+            data["saved_pw"] = hashed_pw
+        else:
+            data.pop("saved_id", None)
+            data.pop("saved_pw", None)
+            
+        try:
+            with open(self.settings_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=4)
+        except:
+            pass
+
+    def init_ui(self):
+        main_layout = QHBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        
+        # Main background container
+        self.container = QFrame(self)
+        self.container.setStyleSheet("QFrame { background-color: transparent; }")
+        container_layout = QHBoxLayout(self.container)
+        container_layout.setContentsMargins(10, 10, 10, 10)
+        container_layout.setSpacing(0)
+        
+        # Add shadow to container
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(20)
+        shadow.setColor(QColor(0, 0, 0, 80))
+        shadow.setOffset(0, 0)
+        
+        # Inner wrapper
+        self.wrapper = QFrame(self.container)
+        self.wrapper.setGraphicsEffect(shadow)
+        self.wrapper.setStyleSheet("QFrame { border-radius: 16px; }")
+        wrapper_layout = QHBoxLayout(self.wrapper)
+        wrapper_layout.setContentsMargins(0, 0, 0, 0)
+        wrapper_layout.setSpacing(0)
+        
+        # --- Left Side (Dark Blue) ---
+        self.left_frame = QFrame(self.wrapper)
+        self.left_frame.setStyleSheet("""
+            QFrame {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #0a1128, stop:1 #1c2e4a);
+                border-top-left-radius: 16px;
+                border-bottom-left-radius: 16px;
+                border-top-right-radius: 0px;
+                border-bottom-right-radius: 0px;
+            }
+        """)
+        left_layout = QVBoxLayout(self.left_frame)
+        left_layout.setContentsMargins(40, 60, 40, 60)
+        
+        logo_label = QLabel("Antigravity", self.left_frame)
+        logo_label.setStyleSheet("color: white; font-size: 24px; font-weight: bold; background: transparent;")
+        
+        welcome_title = QLabel("Login into\nyour account", self.left_frame)
+        welcome_title.setStyleSheet("color: white; font-size: 36px; font-weight: bold; background: transparent;")
+        
+        welcome_sub = QLabel("Start managing your schedule seamlessly.", self.left_frame)
+        welcome_sub.setStyleSheet("color: #a0aec0; font-size: 14px; background: transparent;")
+        
+        left_layout.addWidget(logo_label)
+        left_layout.addStretch(1)
+        left_layout.addWidget(welcome_title)
+        left_layout.addSpacing(10)
+        left_layout.addWidget(welcome_sub)
+        left_layout.addStretch(1)
+        
+        # --- Right Side (White Card) ---
+        self.right_frame = QFrame(self.wrapper)
+        self.right_frame.setFixedWidth(400)
+        self.right_frame.setStyleSheet("""
+            QFrame {
+                background-color: white;
+                border-top-right-radius: 16px;
+                border-bottom-right-radius: 16px;
+                border-top-left-radius: 0px;
+                border-bottom-left-radius: 0px;
+            }
+        """)
+        
+        self.right_layout = QVBoxLayout(self.right_frame)
+        self.right_layout.setContentsMargins(40, 40, 40, 40)
+        
+        self.stack = QStackedWidget(self.right_frame)
+        self.right_layout.addWidget(self.stack)
+        
+        # -- Login Page --
+        self.login_page = QWidget()
+        login_page_layout = QVBoxLayout(self.login_page)
+        login_page_layout.setContentsMargins(0, 0, 0, 0)
+        
+        lbl_id = QLabel("Email / ID")
+        lbl_id.setStyleSheet("color: #4a5568; font-weight: bold;")
+        self.login_id_input = LineEdit()
+        self.login_id_input.setPlaceholderText("name@example.com")
+        
+        lbl_pw = QLabel("Password")
+        lbl_pw.setStyleSheet("color: #4a5568; font-weight: bold;")
+        self.login_pw_input = PasswordLineEdit()
+        self.login_pw_input.setPlaceholderText("••••••••")
+        
+        self.auto_login_cb = CheckBox("자동 로그인 (Keep me signed in)")
+        self.auto_login_cb.setStyleSheet("color: #4a5568;")
+        
+        # Bottom row for login
+        login_bottom_layout = QHBoxLayout()
+        self.to_signup_btn = HyperlinkButton("", "Don't have an account? Sign up")
+        self.to_signup_btn.setAutoDefault(False)
+        self.login_btn = PrimaryPushButton("Login")
+        self.login_btn.setFixedWidth(100)
+        
+        self.to_signup_btn.clicked.connect(lambda: self.stack.setCurrentIndex(1))
+        self.login_btn.clicked.connect(self.do_login)
+        self.login_id_input.returnPressed.connect(self.do_login)
+        self.login_pw_input.returnPressed.connect(self.do_login)
+        
+        login_bottom_layout.addWidget(self.to_signup_btn)
+        login_bottom_layout.addStretch(1)
+        login_bottom_layout.addWidget(self.login_btn)
+        
+        login_page_layout.addStretch(1)
+        login_page_layout.addWidget(lbl_id)
+        login_page_layout.addWidget(self.login_id_input)
+        login_page_layout.addSpacing(15)
+        login_page_layout.addWidget(lbl_pw)
+        login_page_layout.addWidget(self.login_pw_input)
+        login_page_layout.addSpacing(10)
+        login_page_layout.addWidget(self.auto_login_cb)
+        login_page_layout.addSpacing(30)
+        login_page_layout.addLayout(login_bottom_layout)
+        login_page_layout.addStretch(1)
+        
+        # -- Signup Page --
+        self.signup_page = QWidget()
+        signup_page_layout = QVBoxLayout(self.signup_page)
+        signup_page_layout.setContentsMargins(0, 0, 0, 0)
+        
+        s_lbl_name = QLabel("성함 (Name)")
+        s_lbl_name.setStyleSheet("color: #4a5568; font-weight: bold;")
+        self.signup_name_input = LineEdit()
+        
+        s_lbl_id = QLabel("사용할 아이디 (ID)")
+        s_lbl_id.setStyleSheet("color: #4a5568; font-weight: bold;")
+        self.signup_id_input = LineEdit()
+        
+        s_lbl_pw = QLabel("비밀번호 (Password)")
+        s_lbl_pw.setStyleSheet("color: #4a5568; font-weight: bold;")
+        self.signup_pw_input = PasswordLineEdit()
+        
+        s_lbl_pw_conf = QLabel("비밀번호 확인 (Confirm)")
+        s_lbl_pw_conf.setStyleSheet("color: #4a5568; font-weight: bold;")
+        self.signup_pw_conf_input = PasswordLineEdit()
+        
+        # Bottom row for signup
+        signup_bottom_layout = QHBoxLayout()
+        self.to_login_btn = HyperlinkButton("", "Already have an account? Login")
+        self.to_login_btn.setAutoDefault(False)
+        self.signup_btn = PrimaryPushButton("Create Account")
+        
+        self.to_login_btn.clicked.connect(lambda: self.stack.setCurrentIndex(0))
+        self.signup_btn.clicked.connect(self.do_signup)
+        self.signup_id_input.returnPressed.connect(self.do_signup)
+        self.signup_pw_input.returnPressed.connect(self.do_signup)
+        self.signup_pw_conf_input.returnPressed.connect(self.do_signup)
+        
+        signup_bottom_layout.addWidget(self.to_login_btn)
+        signup_bottom_layout.addStretch(1)
+        signup_bottom_layout.addWidget(self.signup_btn)
+        
+        signup_page_layout.addStretch(1)
+        signup_page_layout.addWidget(s_lbl_name)
+        signup_page_layout.addWidget(self.signup_name_input)
+        signup_page_layout.addSpacing(10)
+        signup_page_layout.addWidget(s_lbl_id)
+        signup_page_layout.addWidget(self.signup_id_input)
+        signup_page_layout.addSpacing(10)
+        signup_page_layout.addWidget(s_lbl_pw)
+        signup_page_layout.addWidget(self.signup_pw_input)
+        signup_page_layout.addSpacing(10)
+        signup_page_layout.addWidget(s_lbl_pw_conf)
+        signup_page_layout.addWidget(self.signup_pw_conf_input)
+        signup_page_layout.addSpacing(20)
+        signup_page_layout.addLayout(signup_bottom_layout)
+        signup_page_layout.addStretch(1)
+        
+        self.stack.addWidget(self.login_page)
+        self.stack.addWidget(self.signup_page)
+        
+        # Add Close button at top right
+        close_btn = PushButton("✕", self.right_frame)
+        close_btn.setFixedSize(30, 30)
+        close_btn.setStyleSheet("PushButton { background-color: transparent; border: none; font-size: 16px; color: #a0aec0; } PushButton:hover { color: #e53e3e; }")
+        close_btn.clicked.connect(self.reject)
+        
+        wrapper_layout.addWidget(self.left_frame)
+        wrapper_layout.addWidget(self.right_frame)
+        
+        container_layout.addWidget(self.wrapper)
+        main_layout.addWidget(self.container)
+        
+        # Position close button absolutely
+        close_btn.move(self.right_frame.width() - 40, 10)
+
+    def do_login(self):
+        user_id = self.login_id_input.text().strip()
+        pw = self.login_pw_input.text()
+        
+        if not user_id or not pw:
+            InfoBar.error("오류", "아이디와 비밀번호를 모두 입력해주세요.", parent=self, position=InfoBarPosition.TOP)
+            return
+            
+        self.login_btn.setEnabled(False)
+        self.login_btn.setText("Logging in...")
+        
+        self.thread = LoginThread("login", user_id, pw)
+        self.thread.success.connect(self.on_login_success)
+        self.thread.error.connect(self.on_login_error)
+        self.thread.start()
+
+    def do_auto_login(self):
+        saved_id = self.auto_login_data.get("saved_id")
+        saved_pw_hash = self.auto_login_data.get("saved_pw")
+        
+        if saved_id and saved_pw_hash:
+            # We need to bypass the password check by sending the hash directly.
+            # But LoginThread hashes the input. 
+            # We can tweak LoginThread to accept a pre-hashed password, or just verify locally.
+            # Actually, to make it simple, let's just make LoginThread handle an 'auto_login' mode
+            self.thread = LoginThread("auto_login", saved_id, saved_pw_hash)
+            self.thread.success.connect(self.on_login_success)
+            self.thread.error.connect(self.on_auto_login_error)
+            self.thread.start()
+
+    def do_signup(self):
+        name = self.signup_name_input.text().strip()
+        user_id = self.signup_id_input.text().strip()
+        pw = self.signup_pw_input.text()
+        pw_conf = self.signup_pw_conf_input.text()
+        
+        if not all([name, user_id, pw, pw_conf]):
+            InfoBar.error("오류", "모든 항목을 입력해주세요.", parent=self, position=InfoBarPosition.TOP)
+            return
+            
+        if pw != pw_conf:
+            InfoBar.error("오류", "비밀번호가 일치하지 않습니다.", parent=self, position=InfoBarPosition.TOP)
+            return
+            
+        self.signup_btn.setEnabled(False)
+        self.signup_btn.setText("Creating...")
+        
+        self.thread = LoginThread("signup", user_id, pw, name=name)
+        self.thread.signup_success.connect(self.on_signup_success)
+        self.thread.error.connect(self.on_signup_error)
+        self.thread.start()
+
+    def on_login_success(self, data):
+        global SESSION
+        SESSION["id"] = data["id"]
+        SESSION["name"] = data["name"]
+        
+        # Save auto-login
+        if self.auto_login_cb.isChecked():
+            hashed_pw = hashlib.sha256(self.login_pw_input.text().encode('utf-8')).hexdigest()
+            self.save_settings(data["id"], hashed_pw, True)
+        else:
+            self.save_settings("", "", False)
+            
+        self.accept()
+
+    def on_login_error(self, msg):
+        self.login_btn.setEnabled(True)
+        self.login_btn.setText("Login")
+        InfoBar.error("로그인 실패", msg, parent=self, position=InfoBarPosition.TOP)
+
+    def on_auto_login_error(self, msg):
+        # Silently fail auto-login and show login screen
+        self.save_settings("", "", False)
+
+    def on_signup_success(self, msg):
+        self.signup_btn.setEnabled(True)
+        self.signup_btn.setText("Create Account")
+        InfoBar.success("성공", msg, parent=self, position=InfoBarPosition.TOP)
+        self.stack.setCurrentIndex(0)
+        self.login_id_input.setText(self.signup_id_input.text())
+        self.login_pw_input.clear()
+        
+    def on_signup_error(self, msg):
+        self.signup_btn.setEnabled(True)
+        self.signup_btn.setText("Create Account")
+        InfoBar.error("회원가입 실패", msg, parent=self, position=InfoBarPosition.TOP)
 
 class MainWindow(FluentWindow):
     def __init__(self):
@@ -5145,9 +5760,36 @@ class MainWindow(FluentWindow):
         self.addSubInterface(self.spell_check_interface, FluentIcon.EDIT, '맞춤법 검사기')
         self.addSubInterface(self.settings_interface, FluentIcon.SETTING, '설정', position=NavigationItemPosition.BOTTOM)
         
+        self.navigationInterface.addItem('logout_btn', FluentIcon.POWER_BUTTON, '로그아웃', position=NavigationItemPosition.BOTTOM, onClick=self.handle_logout)
         qconfig.themeChanged.connect(self.update_theme_style)
         self.update_theme_style()
         
+    def handle_logout(self):
+        msg_box = MessageBox("로그아웃", "로그아웃 하시겠습니까?", self)
+        if msg_box.exec_():
+            global SESSION
+            SESSION["id"] = None
+            SESSION["name"] = None
+            
+            import os, sys, json
+            base_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
+            settings_path = os.path.join(base_dir, "Workspace", "settings.json")
+            if os.path.exists(settings_path):
+                try:
+                    with open(settings_path, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                    data["auto_login"] = False
+                    data.pop("saved_id", None)
+                    data.pop("saved_pw", None)
+                    with open(settings_path, 'w', encoding='utf-8') as f:
+                        json.dump(data, f, ensure_ascii=False, indent=4)
+                except:
+                    pass
+                    
+            from PyQt5.QtCore import QProcess
+            QProcess.startDetached(sys.executable, sys.argv)
+            QApplication.quit()
+
     def update_theme_style(self):
         is_dark = isDarkTheme()
         if is_dark:
@@ -5252,6 +5894,10 @@ if __name__ == '__main__':
 
     check_for_updates()
 
-    window = MainWindow()
-    window.show()
-    sys.exit(app.exec_())
+    login_dialog = LoginDialog()
+    if login_dialog.exec_() == QDialog.Accepted:
+        window = MainWindow()
+        window.show()
+        sys.exit(app.exec_())
+    else:
+        sys.exit(0)

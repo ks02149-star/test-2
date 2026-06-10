@@ -1,5 +1,17 @@
+# Python caches
+__pycache__/
+*.pyc
+
+# Local Workspaces & Secrets
 Workspace/credentials.json
-Workspace/키워드_순위_작업표.xlsx
-workspace/error_log.txt
-workspace/.backup
-__pycache__
+Workspace/settings.json
+Workspace/error_log.txt
+Workspace/.backup
+Workspace/*.xlsx
+Workspace/*.md
+
+# Local Settings
+Data/config.ini
+
+# Temp Scripts
+patch_*.py
