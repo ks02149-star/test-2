@@ -1,17 +1,39 @@
-# Python caches
+# Python Cache
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
 
-# Local Workspaces & Secrets
-Workspace/credentials.json
-Workspace/settings.json
-Workspace/error_log.txt
-Workspace/.backup
-Workspace/*.xlsx
-Workspace/*.md
+# PyInstaller / Build outputs
+build/
+dist/
+*.spec
+*.exe
 
-# Local Settings
-Data/config.ini
+# User Settings and Local Data
+# Do not track local user accounts, holidays, and settings
+Data/
+Workspace/
 
-# Temp Scripts
+# Log Files
+*.log
+error_log.txt
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.bak
+
+# Virtual Environment
+venv/
+.env
+
+# Excel Output Files & Temp Files
+# If you want to track a template Excel, keep it in an assets folder.
+# This ignores active working Excel files that change frequently.
+~$*.xlsx
+키워드_순위_작업표*.xlsx
+
+# Temporary migration scripts
+test_runner.py
 patch_*.py
