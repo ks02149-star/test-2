@@ -4,7 +4,7 @@ import subprocess
 def setup_chrome_options():
     from selenium.webdriver.chrome.options import Options
     options = Options()
-    options.add_argument('--headless')
+    options.add_argument('--headless=new')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage') # Memory Leak countermeasure
     options.add_argument('--disable-gpu')
@@ -18,5 +18,6 @@ def kill_zombie_chromes():
     try:
         # Only kill chromedriver processes to avoid killing user's personal chrome.exe
         subprocess.run(['taskkill', '/F', '/IM', 'chromedriver.exe'], capture_output=True)
+        subprocess.run(['taskkill', '/F', '/IM', 'chromedriver_patched.exe'], capture_output=True)
     except Exception:
         pass
