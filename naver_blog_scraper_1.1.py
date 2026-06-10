@@ -1,4 +1,4 @@
-import sys
+﻿import sys
 import traceback
 import subprocess
 import os
@@ -61,7 +61,9 @@ def install_required_packages():
         "openpyxl": "openpyxl",
         "PyQt5": "PyQt5",
         "PyQtWebEngine": "PyQt5.QtWebEngineWidgets",
-        "PyQt-Fluent-Widgets": "qfluentwidgets"
+        "PyQt-Fluent-Widgets": "qfluentwidgets",
+        "gspread": "gspread",
+        "oauth2client": "oauth2client"
     }
     if os.name == 'nt':
         packages["pywin32"] = "win32api"
@@ -86,6 +88,10 @@ import ctypes
 import tempfile
 import concurrent.futures
 import threading
+import json
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+from datetime import datetime, date
 
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
@@ -2341,6 +2347,106 @@ class HomeViewWidget(QWidget):
             super().paintEvent(event)
 
 
+class MonthlyScheduleSummaryCard(QFrame):
+    def __init__(self, main_window):
+        super().__init__()
+        self.main_window = main_window
+        self.setObjectName("MonthlyScheduleSummaryCard")
+        self.setStyleSheet("""
+            QFrame#MonthlyScheduleSummaryCard {
+                background-color: #2C2C2C;
+                border: 1px solid #3A3A3A;
+                border-radius: 10px;
+            }
+            QFrame#MonthlyScheduleSummaryCard:hover {
+                background-color: #333333;
+                border: 1px solid #444444;
+            }
+        """)
+        self.setFixedSize(280, 120)
+        
+        from PyQt5.QtCore import Qt
+        self.setCursor(Qt.PointingHandCursor)
+        
+        self.vBoxLayout = QVBoxLayout(self)
+        self.vBoxLayout.setContentsMargins(16, 16, 16, 16)
+        self.vBoxLayout.setSpacing(8)
+        
+        title_layout = QHBoxLayout()
+        title_icon = IconWidget(FluentIcon.CALENDAR)
+        title_icon.setFixedSize(24, 24)
+        
+        from datetime import date
+        today_date_str = date.today().strftime('%m/%d')
+        title_label = QLabel(f"{today_date_str} 오늘의 일정")
+        from PyQt5.QtGui import QFont
+        title_label.setFont(QFont("SUIT", 14, QFont.Bold))
+        title_label.setStyleSheet("color: #EAEAEA; background: transparent;")
+        title_layout.addWidget(title_icon)
+        title_layout.addWidget(title_label)
+        title_layout.addStretch(1)
+        
+        self.vBoxLayout.addLayout(title_layout)
+        
+        self.content_layout = QVBoxLayout()
+        self.content_layout.setSpacing(2)
+        self.vBoxLayout.addLayout(self.content_layout)
+        
+        self.vBoxLayout.addStretch(1)
+        
+        self.loading_label = QLabel("데이터를 불러오는 중...")
+        self.loading_label.setStyleSheet("color: rgba(255, 255, 255, 0.6); background: transparent;")
+        from PyQt5.QtGui import QFont
+        self.loading_label.setFont(QFont("SUIT", 10))
+        self.content_layout.addWidget(self.loading_label)
+
+    def mousePressEvent(self, event):
+        super().mousePressEvent(event)
+        self.main_window.switchTo(self.main_window.schedule_interface)
+
+    def go_to_calendar(self):
+        # Programmatically switch to schedule tab
+        # main_window.stackedWidget.setCurrentWidget(main_window.schedule_interface)
+        # However, it's a bit tricky due to FluentWindow internal routing. We can do:
+        self.main_window.switchTo(self.main_window.schedule_interface)
+
+    def update_schedule(self, schedules):
+        while self.content_layout.count():
+            item = self.content_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+                
+        if not schedules:
+            no_lbl = QLabel("오늘 예정된 연차 또는 일정이 없습니다.")
+            no_lbl.setStyleSheet("color: #A0A0A0;")
+            self.content_layout.addWidget(no_lbl)
+            return
+            
+        
+        max_items = 2
+        for i, sch in enumerate(schedules):
+            if i >= max_items:
+                more_lbl = QLabel(f"...외 {len(schedules) - max_items}개")
+                more_lbl.setStyleSheet("color: rgba(255, 255, 255, 0.6); font-size: 11px;")
+                self.content_layout.addWidget(more_lbl)
+                break
+                
+            text = sch[0] if isinstance(sch, tuple) else sch
+            color = sch[1] if isinstance(sch, tuple) else "#1976D2"
+            
+            try:
+                r = int(color[1:3], 16)
+                g = int(color[3:5], 16)
+                b = int(color[5:7], 16)
+                luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+                text_color = "#000000" if luminance > 0.5 else "#ffffff"
+            except:
+                text_color = "#000000"
+                
+            lbl = QLabel(text)
+            lbl.setStyleSheet(f"background-color: {color}; color: {text_color}; border-radius: 4px; padding: 1px 6px; font-size: 11px; font-weight: bold;")
+            self.content_layout.addWidget(lbl)
+
 class HomeInterface(ScrollArea):
     def __init__(self, main_window, parent=None):
         super().__init__(parent=parent)
@@ -2443,6 +2549,14 @@ class HomeInterface(ScrollArea):
         self.index_card = FeatureCard(getattr(FluentIcon, "PIE_SINGLE", FluentIcon.DOCUMENT), "지수 체크(개발중)", "블로그 지수 분석 및 확인")
         self.spell_card = FeatureCard(FluentIcon.EDIT, "맞춤법 검사기", "맞춤법 검사기")
         
+        self.schedule_card = MonthlyScheduleSummaryCard(self.main_window)
+        
+        # Start fetching today's schedule
+        from datetime import date
+        self.fetch_thread = ScheduleFetchThread()
+        self.fetch_thread.data_fetched.connect(self.on_schedule_fetched)
+        self.fetch_thread.start()
+        
         self.scraper_card.clicked.connect(lambda: self.main_window.switchTo(self.main_window.scraper_interface))
         self.place_card.clicked.connect(lambda: self.main_window.switchTo(self.main_window.place_scraper_interface))
         self.company_card.clicked.connect(lambda: self.main_window.switchTo(self.main_window.company_list_interface))
@@ -2454,6 +2568,7 @@ class HomeInterface(ScrollArea):
         self.grid_layout.addWidget(self.company_card, 1, 0)
         self.grid_layout.addWidget(self.index_card, 1, 1)
         self.grid_layout.addWidget(self.spell_card, 2, 0)
+        self.grid_layout.addWidget(self.schedule_card, 2, 1)
         
         self.left_panel.addLayout(self.grid_layout)
         self.left_panel.addStretch(1)
@@ -2528,6 +2643,22 @@ class HomeInterface(ScrollArea):
             
     def on_news_error(self, err):
         self.loading_label.setText(f"뉴스를 불러오는데 실패했습니다: {err}")
+
+    def on_schedule_fetched(self, data):
+        schedules = data.get('schedules', [])
+        from datetime import date
+        today_str = str(date.today())
+        today_schedules = []
+        for row in schedules:
+            if len(row) >= 3 and row[0].strip() == today_str:
+                today_schedules.append((row[1].strip(), row[2]))
+        
+        holidays = data.get('holidays', {})
+        holiday_today = holidays.get(today_str)
+        if holiday_today:
+            today_schedules.insert(0, (f"공휴일: {holiday_today}", "#ff6b6b"))
+            
+        self.schedule_card.update_schedule(today_schedules)
 
 
 class SettingInterface(ScrollArea):
@@ -4631,6 +4762,361 @@ def check_for_updates(manual_check=False):
             from PyQt5.QtWidgets import QMessageBox
             QMessageBox.critical(None, "오류", f"업데이트 확인 중 오류가 발생했습니다:\n{str(e)}")
 
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, 
+                             QLabel, QFrame, QDialog, QMessageBox)
+from qfluentwidgets import (TitleLabel, SubtitleLabel, ComboBox, PushButton, 
+                            PrimaryPushButton, LineEdit, InfoBar, ScrollArea)
+from calendar import monthrange
+
+class ScheduleFetchThread(QThread):
+    data_fetched = pyqtSignal(object)
+    error_occurred = pyqtSignal(str)
+    
+    def __init__(self, spreadsheet_id="1wWLxMTY3D5urtn0gomepgA1blQnyz05BUi2wepWBTDk", sheet_name="schedule"):
+        super().__init__()
+        self.spreadsheet_id = spreadsheet_id
+        self.sheet_name = sheet_name
+        
+    def run(self):
+        try:
+            base_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
+            creds_path = os.path.join(base_dir, "Workspace", "credentials.json")
+            if not os.path.exists(creds_path):
+                self.error_occurred.emit("credentials.json 파일을 찾을 수 없습니다.")
+                return
+
+            scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+            creds = ServiceAccountCredentials.from_json_keyfile_name(creds_path, scope)
+            client = gspread.authorize(creds)
+            
+            import urllib.parse
+            sort_range = urllib.parse.quote('정렬기준!A:A')
+            url = f'https://sheets.googleapis.com/v4/spreadsheets/{self.spreadsheet_id}?includeGridData=true&ranges={self.sheet_name}!A:B&ranges=holidays!A:B&ranges={sort_range}'
+            res = client.http_client.request('get', url)
+            
+            if res.status_code != 200:
+                self.error_occurred.emit("데이터를 가져오는데 실패했습니다.")
+                return
+
+            sheets = res.json().get('sheets', [])
+            schedule_grid = sheets[0].get('data', [{}])[0].get('rowData', []) if len(sheets) > 0 else []
+            
+            parsed_data = []
+            for row in schedule_grid:
+                if 'values' in row and len(row['values']) >= 2:
+                    date_val = row['values'][0].get('formattedValue', '')
+                    text_val = row['values'][1].get('formattedValue', '')
+                    
+                    color_data = row['values'][1].get('effectiveFormat', {}).get('backgroundColor', {})
+                    r = int(color_data.get('red', 1) * 255)
+                    g = int(color_data.get('green', 1) * 255)
+                    b = int(color_data.get('blue', 1) * 255)
+                    color_hex = f'#{r:02x}{g:02x}{b:02x}'
+                    
+                    if color_hex.lower() == '#ffffff':
+                        if '김현우' in text_val or '공훈식' in text_val:
+                            color_hex = '#c9daf8'
+                        elif '김태훈' in text_val or '장여진' in text_val:
+                            color_hex = '#d9d2e9'
+                        elif text_val.strip():
+                            color_hex = '#d9ead3'
+                        else:
+                            color_hex = '#ffffff' 
+                    
+                    parsed_data.append([date_val, text_val, color_hex])
+            
+            holidays_grid = sheets[1].get('data', [{}])[0].get('rowData', []) if len(sheets) > 1 else []
+            parsed_holidays = {}
+            import re
+            for row in holidays_grid:
+                if 'values' in row and len(row['values']) >= 2:
+                    date_val = row['values'][0].get('formattedValue', '')
+                    text_val = row['values'][1].get('formattedValue', '')
+                    if date_val and text_val:
+                        match = re.search(r'(\d{4}-\d{2}-\d{2})', date_val)
+                        if match:
+                            parsed_holidays[match.group(1)] = text_val
+                            
+            sort_order = ['김현우', '공훈식', '김태훈', '장여진', '김정원', '김가현', '김태형', '이승희', '홍지민']
+            if len(sheets) > 2:
+                sort_grid = sheets[2].get('data', [{}])[0].get('rowData', [])
+                fetched_order = []
+                for row in sort_grid:
+                    if 'values' in row and len(row['values']) > 0:
+                        val = row['values'][0].get('formattedValue', '')
+                        if val:
+                            val = val.strip()
+                            if val and val != '이름':
+                                fetched_order.append(val)
+                if fetched_order:
+                    sort_order = fetched_order
+
+            def get_rank(item):
+                text_val = item[1]
+                for idx, name in enumerate(sort_order):
+                    if name in text_val:
+                        return idx
+                return 999
+            
+            parsed_data.sort(key=get_rank)
+            
+            self.data_fetched.emit({'schedules': parsed_data, 'holidays': parsed_holidays})
+        except Exception as e:
+            self.error_occurred.emit(str(e))
+
+
+class ScheduleAddDialog(QDialog):
+    def __init__(self, date_str, parent=None):
+        super().__init__(parent)
+        self.date_str = date_str
+        self.setWindowTitle(f"일정 추가 - {date_str}")
+        self.setFixedSize(300, 150)
+        
+        from qfluentwidgets import isDarkTheme
+        is_dark = isDarkTheme()
+        bg_color = "#2b2b2b" if is_dark else "#ffffff"
+        self.setStyleSheet(f"QDialog {{ background-color: {bg_color}; }}")
+        
+        layout = QVBoxLayout(self)
+        
+        self.title_label = SubtitleLabel(f"{date_str} 일정 추가")
+        layout.addWidget(self.title_label)
+        
+        self.input_edit = LineEdit()
+        self.input_edit.setPlaceholderText("예: OOO 연차")
+        layout.addWidget(self.input_edit)
+        
+        btn_layout = QHBoxLayout()
+        self.save_btn = PrimaryPushButton("저장")
+        self.cancel_btn = PushButton("취소")
+        
+        btn_layout.addWidget(self.save_btn)
+        btn_layout.addWidget(self.cancel_btn)
+        layout.addLayout(btn_layout)
+        
+        self.save_btn.clicked.connect(self.accept)
+        self.cancel_btn.clicked.connect(self.reject)
+        
+    def get_schedule_text(self):
+        return self.input_edit.text().strip()
+
+
+class ScheduleInterface(ScrollArea):
+    def __init__(self):
+        super().__init__()
+        self.setObjectName("ScheduleInterface")
+        self.view = QWidget()
+        self.view.setObjectName('ScheduleView')
+        self.view.setStyleSheet('QWidget#ScheduleView { background-color: transparent; }')
+        self.setStyleSheet('QScrollArea { background-color: transparent; border: none; }')
+        self.setWidget(self.view)
+        self.setWidgetResizable(True)
+        
+        self.vBoxLayout = QVBoxLayout(self.view)
+        self.vBoxLayout.setContentsMargins(30, 30, 30, 30)
+        self.vBoxLayout.setSpacing(20)
+        
+        self.title_label = TitleLabel("월간 일정표")
+        self.title_label.setStyleSheet("color: white;")
+        self.vBoxLayout.addWidget(self.title_label)
+        
+        self.control_layout = QHBoxLayout()
+        self.year_combo = ComboBox()
+        self.month_combo = ComboBox()
+        current_date = date.today()
+        
+        for y in range(current_date.year - 2, current_date.year + 3):
+            self.year_combo.addItem(f"{y}년", userData=y)
+        for m in range(1, 13):
+            self.month_combo.addItem(f"{m}월", userData=m)
+            
+        self.year_combo.setCurrentIndex(self.year_combo.findData(current_date.year))
+        self.month_combo.setCurrentIndex(self.month_combo.findData(current_date.month))
+        
+        self.year_combo.currentIndexChanged.connect(self.build_calendar)
+        self.month_combo.currentIndexChanged.connect(self.build_calendar)
+        
+        self.refresh_btn = PushButton("수동 새로고침")
+        self.refresh_btn.clicked.connect(self.trigger_refresh)
+        
+        self.today_btn = PushButton("오늘 날짜로")
+        self.today_btn.clicked.connect(self.go_to_today)
+        
+        self.control_layout.addWidget(self.year_combo)
+        self.control_layout.addWidget(self.month_combo)
+        self.control_layout.addWidget(self.today_btn)
+        self.control_layout.addWidget(self.refresh_btn)
+        self.control_layout.addStretch(1)
+        self.vBoxLayout.addLayout(self.control_layout)
+        
+        self.calendar_grid = QGridLayout()
+        self.calendar_grid.setSpacing(1)
+        self.vBoxLayout.addLayout(self.calendar_grid)
+        self.vBoxLayout.addStretch(1)
+        
+        self.schedule_data = {}
+        self.holidays_data = {}
+        
+        self.fetch_timer = QTimer(self)
+        self.fetch_timer.timeout.connect(self.trigger_refresh)
+        self.fetch_timer.start(60000)
+        
+        self.trigger_refresh()
+
+    def build_calendar(self):
+        for i in reversed(range(self.calendar_grid.count())): 
+            widget = self.calendar_grid.itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
+                
+        year = self.year_combo.currentData()
+        month = self.month_combo.currentData()
+        if not year or not month: return
+        
+        days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+        for i, day in enumerate(days):
+            lbl = QLabel(day)
+            lbl.setAlignment(Qt.AlignCenter)
+            color = "#ff6b6b" if i == 0 else ("#4dabf7" if i == 6 else "#e0e0e0")
+            lbl.setStyleSheet(f"font-weight: bold; color: {color}; font-size: 14px; padding: 5px;")
+            self.calendar_grid.addWidget(lbl, 0, i)
+            
+        first_weekday, num_days = monthrange(year, month)
+        first_weekday = (first_weekday + 1) % 7 
+        
+        row = 1
+        col = first_weekday
+        
+        for d in range(1, num_days + 1):
+            date_str = f"{year}-{month:02d}-{d:02d}"
+            
+            cell_widget = QFrame()
+            cell_widget.setFrameShape(QFrame.StyledPanel)
+            cell_widget.setStyleSheet("QFrame { background-color: #2b2b2b; border: 1px solid #3c3c3c; border-radius: 4px; } QFrame:hover { background-color: #3b3b3b; }")
+            
+            cell_layout = QVBoxLayout(cell_widget)
+            cell_layout.setContentsMargins(5, 5, 5, 5)
+            cell_layout.setSpacing(2)
+            
+            day_lbl = QLabel(str(d))
+            day_color = "#ff6b6b" if col == 0 else ("#4dabf7" if col == 6 else "#e0e0e0")
+            
+            holiday_text = self.holidays_data.get(date_str)
+            if holiday_text:
+                day_lbl.setText(f"{d} {holiday_text}")
+                day_color = "#ff6b6b"
+                
+            day_lbl.setStyleSheet(f"color: {day_color}; font-weight: bold; border: none; background: transparent;")
+            cell_layout.addWidget(day_lbl)
+            
+            schedules = self.schedule_data.get(date_str, [])
+            for sch_data in schedules:
+                if isinstance(sch_data, tuple):
+                    sch, color = sch_data
+                else:
+                    sch = sch_data
+                    color = "#1976D2"
+                
+                try:
+                    r = int(color[1:3], 16)
+                    g = int(color[3:5], 16)
+                    b = int(color[5:7], 16)
+                    luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+                    text_color = "#000000" if luminance > 0.5 else "#ffffff"
+                except:
+                    text_color = "#000000"
+                    
+                sch_lbl = QLabel(sch)
+                sch_lbl.setStyleSheet(f"background-color: {color}; color: {text_color}; border-radius: 3px; padding: 4px; border: none; font-size: 12px; font-weight: bold;")
+                sch_lbl.setWordWrap(True)
+                cell_layout.addWidget(sch_lbl)
+                
+            cell_layout.addStretch(1)
+            cell_widget.setMinimumHeight(120)
+            
+            cell_widget.mouseDoubleClickEvent = lambda event, ds=date_str: self.on_cell_double_clicked(ds)
+            
+            self.calendar_grid.addWidget(cell_widget, row, col)
+            col += 1
+            if col > 6:
+                col = 0
+                row += 1
+
+    def on_cell_double_clicked(self, date_str):
+        dialog = ScheduleAddDialog(date_str, self)
+        if dialog.exec_():
+            text = dialog.get_schedule_text()
+            if text:
+                # Add locally for instant feedback
+                if date_str not in self.schedule_data:
+                    self.schedule_data[date_str] = []
+                self.schedule_data[date_str].append((text, "#1976D2"))
+                self.build_calendar()
+                # Run thread to add to remote
+                self.add_thread = ScheduleAddThread(date_str, text)
+                self.add_thread.error_occurred.connect(self.on_error_occurred)
+                self.add_thread.start()
+
+    def go_to_today(self):
+        from datetime import date
+        today = date.today()
+        y_idx = self.year_combo.findData(today.year)
+        m_idx = self.month_combo.findData(today.month)
+        if y_idx >= 0: self.year_combo.setCurrentIndex(y_idx)
+        if m_idx >= 0: self.month_combo.setCurrentIndex(m_idx)
+        self.trigger_refresh()
+
+    def trigger_refresh(self):
+        self.fetch_thread = ScheduleFetchThread()
+        self.fetch_thread.data_fetched.connect(self.on_data_fetched)
+        self.fetch_thread.error_occurred.connect(self.on_error_occurred)
+        self.fetch_thread.start()
+
+    def on_data_fetched(self, data):
+        self.schedule_data.clear()
+        self.holidays_data = data.get('holidays', {})
+        for i, row in enumerate(data.get('schedules', [])):
+            if i == 0 or len(row) < 3: continue
+            d_str = row[0].strip()
+            sch = row[1].strip()
+            color = row[2]
+            if d_str and sch:
+                if d_str not in self.schedule_data:
+                    self.schedule_data[d_str] = []
+                self.schedule_data[d_str].append((sch, color))
+        self.build_calendar()
+
+    def on_error_occurred(self, err):
+        pass
+
+class ScheduleAddThread(QThread):
+    error_occurred = pyqtSignal(str)
+    
+    def __init__(self, date_str, text, spreadsheet_id="1wWLxMTY3D5urtn0gomepgA1blQnyz05BUi2wepWBTDk", sheet_name="schedule"):
+        super().__init__()
+        self.date_str = date_str
+        self.text = text
+        self.spreadsheet_id = spreadsheet_id
+        self.sheet_name = sheet_name
+        
+    def run(self):
+        try:
+            base_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
+            creds_path = os.path.join(base_dir, "Workspace", "credentials.json")
+            if not os.path.exists(creds_path):
+                self.error_occurred.emit("credentials.json 파일을 찾을 수 없습니다.")
+                return
+
+            scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+            creds = ServiceAccountCredentials.from_json_keyfile_name(creds_path, scope)
+            client = gspread.authorize(creds)
+            
+            sheet = client.open_by_key(self.spreadsheet_id).worksheet(self.sheet_name)
+            sheet.append_row([self.date_str, self.text])
+        except Exception as e:
+            self.error_occurred.emit(str(e))
+
 class MainWindow(FluentWindow):
     def __init__(self):
         super().__init__()
@@ -4642,6 +5128,7 @@ class MainWindow(FluentWindow):
         self.init_window()
         
         self.home_interface = HomeInterface(self)
+        self.schedule_interface = ScheduleInterface()
         self.scraper_interface = ScraperInterface(self)
         self.place_scraper_interface = PlaceScraperInterface(self)
         self.company_list_interface = CompanyListInterface(self)
@@ -4650,6 +5137,7 @@ class MainWindow(FluentWindow):
         self.settings_interface = SettingInterface(self)
         
         self.addSubInterface(self.home_interface, FluentIcon.HOME, '홈')
+        self.addSubInterface(self.schedule_interface, getattr(FluentIcon, "CALENDAR", FluentIcon.DATE_TIME), "월간 일정표")
         self.addSubInterface(self.scraper_interface, FluentIcon.DOCUMENT, '블로그 순위 체크')
         self.addSubInterface(self.place_scraper_interface, getattr(FluentIcon, "POI", FluentIcon.SEARCH), '플레이스 순위 체크')
         self.addSubInterface(self.company_list_interface, FluentIcon.PEOPLE, '업체 리스트')
