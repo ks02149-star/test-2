@@ -14,23 +14,10 @@ if exist "dist\푸름애드_관리프로그램" rmdir /s /q "dist\푸름애드_�
 if exist "main.spec" del /q "main.spec"
 
 echo 3. PyInstaller 패키징 시작...
-pyinstaller --noconfirm ^
-    --onedir ^
-    --windowed ^
-    --noconsole ^
-    --name "푸름애드_관리프로그램" ^
-    --icon "assets\images\logo.ico" ^
-    --hidden-import "PyQt5.QtWebEngineWidgets" ^
-    --hidden-import "webdriver_manager" ^
-    --hidden-import "selenium" ^
-    --hidden-import "pandas" ^
-    --hidden-import "openpyxl" ^
-    --hidden-import "gspread" ^
-    --hidden-import "oauth2client" ^
-    "src\main.py"
+pyinstaller --noconfirm --onedir --windowed --noconsole --name "푸름애드_관리프로그램" --icon "assets\images\logo.ico" --hidden-import "PyQt5.QtWebEngineWidgets" --hidden-import "webdriver_manager" --hidden-import "selenium" --hidden-import "pandas" --hidden-import "openpyxl" --hidden-import "gspread" --hidden-import "oauth2client" "src\main.py"
 
 echo.
-echo 4. 필수 외부 자산(Assets, Font, 엑셀 파일 등) 복사 중...
+echo 4. 필수 외부 자산 복사 중...
 
 xcopy "assets" "dist\푸름애드_관리프로그램\assets" /E /I /H /Y >nul
 xcopy "Font" "dist\푸름애드_관리프로그램\Font" /E /I /H /Y >nul
