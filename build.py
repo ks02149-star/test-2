@@ -37,6 +37,7 @@ def main():
         "--onefile",
         "--windowed",
         "--name", "푸름애드_관리프로그램",
+        "--paths", ".",
         "--add-data", f"assets{os.pathsep}assets/",
         "--add-data", f"Font{os.pathsep}Font/",
         "--collect-all", "qfluentwidgets",
