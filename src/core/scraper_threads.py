@@ -90,10 +90,35 @@ class ScraperWorker(QThread):
     def log(self, message):
         self.signals.log.emit(message)
 
+    def get_random_android_ua_and_size(self):
+        import random
+        pool = [
+            ("Mozilla/5.0 (Linux; Android 14; SM-S928N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.6478.122 Mobile Safari/537.36", "412,915"),
+            ("Mozilla/5.0 (Linux; Android 13; SM-A536N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.6422.113 Mobile Safari/537.36", "412,915"),
+            ("Mozilla/5.0 (Linux; Android 14; SM-F731N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.6367.113 Mobile Safari/537.36", "360,844"),
+            ("Mozilla/5.0 (Linux; Android 13; SM-G998N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.6312.118 Mobile Safari/537.36", "384,853"),
+            ("Mozilla/5.0 (Linux; Android 14; SM-S918N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.6478.122 Mobile Safari/537.36", "412,915")
+        ]
+        return random.choice(pool)
+
     def get_thread_driver(self):
         if not hasattr(self.thread_local, 'driver'):
             from src.utils.driver_manager import setup_chrome_options
-            options = setup_chrome_options()
+            from selenium.webdriver.chrome.options import Options
+            base_options = setup_chrome_options()
+            options = Options()
+            
+            ua, size = self.get_random_android_ua_and_size()
+            
+            for arg in base_options.arguments:
+                if not arg.startswith('--window-size=') and not arg.startswith('user-agent='):
+                    options.add_argument(arg)
+                    
+            for key, val in base_options.experimental_options.items():
+                options.add_experimental_option(key, val)
+                
+            options.add_argument(f"user-agent={ua}")
+            options.add_argument(f"--window-size={size}")
             options.page_load_strategy = 'eager'
             
             service = Service(self.global_driver_path)
