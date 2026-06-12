@@ -266,9 +266,9 @@ class FavoriteEditDialog(QDialog):
         self.inputs = {}
         
         # 키워드
-        lbl_kw = QLabel("검색 키워드", self)
-        lbl_kw.setFont(QFont("SUIT", 10, QFont.Bold))
-        self.layout.addWidget(lbl_kw)
+        self.lbl_kw = QLabel("검색 키워드", self)
+        self.lbl_kw.setFont(QFont("SUIT", 10, QFont.Bold))
+        self.layout.addWidget(self.lbl_kw)
         self.inputs['keyword'] = LineEdit(self)
         self.inputs['keyword'].setPlaceholderText("예: 부산 성형외과")
         if data and 'keyword' in data:
@@ -276,9 +276,9 @@ class FavoriteEditDialog(QDialog):
         self.layout.addWidget(self.inputs['keyword'])
         
         # 업체명
-        lbl_cp = QLabel("목표 업체명", self)
-        lbl_cp.setFont(QFont("SUIT", 10, QFont.Bold))
-        self.layout.addWidget(lbl_cp)
+        self.lbl_cp = QLabel("목표 업체명", self)
+        self.lbl_cp.setFont(QFont("SUIT", 10, QFont.Bold))
+        self.layout.addWidget(self.lbl_cp)
         self.inputs['company'] = LineEdit(self)
         self.inputs['company'].setPlaceholderText("예: 푸름애드 의원")
         if data and 'company' in data:
@@ -286,9 +286,9 @@ class FavoriteEditDialog(QDialog):
         self.layout.addWidget(self.inputs['company'])
         
         # 탐색 개수
-        lbl_cnt = QLabel("탐색 목표 개수", self)
-        lbl_cnt.setFont(QFont("SUIT", 10, QFont.Bold))
-        self.layout.addWidget(lbl_cnt)
+        self.lbl_cnt = QLabel("탐색 목표 개수", self)
+        self.lbl_cnt.setFont(QFont("SUIT", 10, QFont.Bold))
+        self.layout.addWidget(self.lbl_cnt)
         self.inputs['count'] = SpinBox(self)
         self.inputs['count'].setRange(1, 150)
         self.inputs['count'].setValue(data.get('count', 50) if data else 50)
@@ -325,6 +325,9 @@ class FavoriteEditDialog(QDialog):
             }}
         """)
         self.title_label.setStyleSheet(f"color: {text_color}; background: transparent;")
+        self.lbl_kw.setStyleSheet(f"color: {text_color}; background: transparent;")
+        self.lbl_cp.setStyleSheet(f"color: {text_color}; background: transparent;")
+        self.lbl_cnt.setStyleSheet(f"color: {text_color}; background: transparent;")
         
     def get_data(self):
         return {

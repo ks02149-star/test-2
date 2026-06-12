@@ -754,14 +754,20 @@ class SpellCheckWorker(QThread):
 
 
 class PlaceScraperWorker(QThread):
-    def __init__(self, keyword, target_company, display_count, global_driver_path):
+    def __init__(self, keyword, target_company, display_count, global_driver_path, record_mode=False):
         super().__init__()
         self.keyword = keyword
         self.target_company = target_company
         self.display_count = display_count
         self.global_driver_path = global_driver_path
+        self.record_mode = record_mode
         self.signals = WorkerSignals()
         self.driver = None
+        self._is_stopped = False
+
+    def stop(self):
+        self._is_stopped = True
+        self.cleanup_drivers()
 
     def log(self, message):
         self.signals.log.emit(message)
@@ -1006,6 +1012,113 @@ class PlaceScraperWorker(QThread):
             return ", ".join([f"{i}위" for i in found_indices])
         return "미노출 (범위 밖)"
 
+    def write_to_sheet(self, ranks):
+        if not self.record_mode:
+            return
+            
+        try:
+            import gspread
+            from oauth2client.service_account import ServiceAccountCredentials
+            import os
+            import datetime
+            import time
+            from src.config import CREDENTIALS_PATH
+            from gspread.utils import rowcol_to_a1
+            
+            if not os.path.exists(CREDENTIALS_PATH):
+                self.log("[기록 모드 오류] 자격증명 파일(credentials.json)이 존재하지 않아 기록을 생략합니다.")
+                return
+                
+            self.log("[기록 모드] 구글 스프레드시트 업데이트를 시작합니다...")
+            
+            scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+            creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_PATH, scope)
+            client = gspread.authorize(creds)
+            
+            sheet = client.open_by_key('17V0qlJg4hmpo1rLS5oAq9UPkFO6kQ1iMnovERV9PTOs').worksheet('Raw data')
+            
+            row1 = sheet.row_values(1)
+            target_col = -1
+            
+            clean_target = self.target_company.replace(" ", "")
+            for i, val in enumerate(row1):
+                if val:
+                    clean_val = val.replace(" ", "")
+                    if clean_target in clean_val or clean_val in clean_target:
+                        target_col = i + 1
+                        break
+                        
+            if target_col == -1:
+                target_col = ((len(row1) + 3) // 4) * 4 + 1
+                if len(row1) == 0:
+                    target_col = 1
+                    
+                title_range = f"{rowcol_to_a1(1, target_col)}:{rowcol_to_a1(1, target_col+2)}"
+                date_cell = rowcol_to_a1(2, target_col)
+                keyword_cell = rowcol_to_a1(2, target_col+1)
+                rank_cell = rowcol_to_a1(2, target_col+2)
+                
+                sheet.update_cell(1, target_col, self.target_company)
+                sheet.update_cell(2, target_col, "날짜")
+                sheet.update_cell(2, target_col+1, "키워드")
+                sheet.update_cell(2, target_col+2, "순위")
+                
+                try:
+                    sheet.format(title_range, {
+                        "textFormat": {"bold": True, "fontSize": 10},
+                        "horizontalAlignment": "CENTER",
+                    })
+                    sheet.format(date_cell, {
+                        "backgroundColor": {"red": 0.85, "green": 0.95, "blue": 0.85},
+                        "horizontalAlignment": "CENTER",
+                    })
+                    sheet.format(keyword_cell, {
+                        "backgroundColor": {"red": 0.85, "green": 0.9, "blue": 1.0},
+                        "horizontalAlignment": "CENTER",
+                    })
+                    sheet.format(rank_cell, {
+                        "backgroundColor": {"red": 1.0, "green": 0.85, "blue": 0.85},
+                        "horizontalAlignment": "CENTER",
+                    })
+                    sheet.merge_cells(title_range)
+                except Exception as fe:
+                    self.log(f"[기록 모드 서식 오류] {fe}")
+            
+            today_str = datetime.date.today().strftime("%Y-%m-%d")
+            
+            if ranks and len(ranks) > 0:
+                rank_val = str(ranks[0])
+            else:
+                rank_val = "미노출"
+                
+            data_to_write = [today_str, self.keyword, rank_val]
+            max_retries = 5
+            
+            for attempt in range(max_retries):
+                col_vals = sheet.col_values(target_col)
+                next_row = len(col_vals) + 1
+                if next_row < 3:
+                    next_row = 3
+                
+                range_to_update = f"{rowcol_to_a1(next_row, target_col)}:{rowcol_to_a1(next_row, target_col+2)}"
+                sheet.update([data_to_write], range_to_update)
+                
+                time.sleep(1)
+                verify_vals = sheet.get(range_to_update)
+                
+                if verify_vals and len(verify_vals) > 0 and verify_vals[0] == data_to_write:
+                    self.log(f"[기록 모드 완료] 행 {next_row}에 안전하게 기록되었습니다.")
+                    return
+                else:
+                    self.log(f"[기록 모드 재시도] 행 {next_row}에 동시 기입 충돌 감지! 재시도 중... ({attempt+1}/{max_retries})")
+                    
+            self.log("[기록 모드 실패] 동시 기입 충돌로 인해 기록에 실패했습니다.")
+            
+        except Exception as e:
+            self.log(f"[기록 모드 치명적 오류] {e}")
+
+
+
     def run(self):
         import pandas as pd
         import openpyxl
@@ -1035,6 +1148,9 @@ class PlaceScraperWorker(QThread):
             self.log(f"※ 봇 탐지 우회를 위해 {delay_time:.1f}초 대기 중...")
             time.sleep(delay_time)
             
+            if getattr(self, '_is_stopped', False):
+                raise Exception("작업이 사용자에 의해 취소되었습니다.")
+                
             patched_driver_path = self.get_patched_chromedriver()
             if not patched_driver_path:
                 error_msg = "크롬 드라이버를 찾을 수 없거나 패치할 수 없습니다."
@@ -1165,10 +1281,17 @@ class PlaceScraperWorker(QThread):
             self.log(result_text)
             self.log(f"▶ 기록 준비 완료: {sim_rank}")
             
+            if self.record_mode:
+                self.write_to_sheet(ranks)
+
         except Exception as e:
-            self.log(f"[메인 오류] {e}")
-            traceback.print_exc()
-            error_msg = str(e)
+            if getattr(self, '_is_stopped', False):
+                error_msg = "작업이 사용자에 의해 취소되었습니다."
+                self.log(f"[안내] {error_msg}")
+            else:
+                self.log(f"[메인 오류] {e}")
+                traceback.print_exc()
+                error_msg = str(e)
             has_error = True
         finally:
             self.cleanup_drivers()

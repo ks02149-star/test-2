@@ -812,6 +812,7 @@ class ScheduleItemWidget(QFrame):
 class FavoritePlaceCard(QFrame):
     double_clicked = pyqtSignal(int)
     single_clicked = pyqtSignal(int)
+    cancel_clicked = pyqtSignal(int)
     
     def __init__(self, index, data, parent=None):
         super().__init__(parent)
@@ -941,10 +942,11 @@ class FavoritePlaceCard(QFrame):
         
     def mouseReleaseEvent(self, event):
         super().mouseReleaseEvent(event)
-        # Avoid triggering single click if status is already running or queued
-        # Wait, if double click is fired, mouseRelease might also fire. Let's just emit on single.
-        if self.status == "idle" and self.data.get('keyword'):
-            self.single_clicked.emit(self.index)
+        if self.data.get('keyword'):
+            if self.status in ["queued", "running"]:
+                self.cancel_clicked.emit(self.index)
+            else:
+                self.single_clicked.emit(self.index)
             
     def closeEvent(self, event):
         try:

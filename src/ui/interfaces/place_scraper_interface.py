@@ -133,6 +133,12 @@ class PlaceScraperInterface(QWidget):
         """)
         self.start_btn.clicked.connect(self.start_scraping)
         button_layout.addWidget(self.start_btn)
+        
+        self.record_switch = SwitchButton(self)
+        self.record_switch.setOnText("기록 모드 ON")
+        self.record_switch.setOffText("기록 모드 OFF")
+        button_layout.addWidget(self.record_switch)
+        
         button_layout.addStretch(1)
         
         left_layout.addLayout(button_layout)
@@ -159,6 +165,7 @@ class PlaceScraperInterface(QWidget):
             card = FavoritePlaceCard(i, self.favorites_data[i], self)
             card.double_clicked.connect(self.edit_favorite)
             card.single_clicked.connect(self.queue_favorite_task)
+            card.cancel_clicked.connect(self.cancel_favorite_task)
             row = i // 4
             col = i % 4
             self.fav_grid.addWidget(card, row, col)
@@ -268,13 +275,27 @@ class PlaceScraperInterface(QWidget):
             'index': index,
             'keyword': keyword,
             'company': company,
-            'count': count
+            'count': count,
+            'record_mode': self.record_switch.isChecked()
         }
         self.task_queue.append(task)
         self.favorite_cards[index].set_status("queued")
         self.append_log(f"[대기열 추가] 즐겨찾기 {index+1}번: '{keyword}' / '{company}'")
         self.start_btn.setEnabled(False)
         self.process_next_task()
+
+    def cancel_favorite_task(self, index):
+        card = self.favorite_cards[index]
+        if card.status == "queued":
+            self.task_queue = [t for t in self.task_queue if not (t.get('type') == 'favorite' and t.get('index') == index)]
+            card.set_status("idle")
+            self.append_log(f"[취소] 즐겨찾기 {index+1}번 대기열에서 제거됨.")
+            if not self.task_queue and not (hasattr(self, 'worker') and self.worker and self.worker.isRunning()):
+                self.start_btn.setEnabled(True)
+        elif card.status == "running":
+            if hasattr(self, 'worker') and self.worker and self.worker.isRunning():
+                self.worker.stop()
+                self.append_log(f"[취소] 즐겨찾기 {index+1}번 작업 취소 요청 중...")
 
     def start_scraping(self):
         keyword = self.keyword_input.text().strip()
@@ -290,7 +311,8 @@ class PlaceScraperInterface(QWidget):
             'type': 'manual',
             'keyword': keyword,
             'company': company,
-            'count': display_count
+            'count': display_count,
+            'record_mode': self.record_switch.isChecked()
         }
         self.task_queue.append(task)
         self.append_log(f"[대기열 추가] 수동 검색: '{keyword}' / '{company}'")
@@ -321,7 +343,8 @@ class PlaceScraperInterface(QWidget):
             self.current_task['keyword'], 
             self.current_task['company'], 
             self.current_task['count'], 
-            self.global_driver_path
+            self.global_driver_path,
+            self.current_task.get('record_mode', False)
         )
         self.worker.signals.log.connect(self.append_log)
         self.worker.signals.error.connect(self.show_error)
@@ -335,6 +358,10 @@ class PlaceScraperInterface(QWidget):
             self.current_task['ranks'] = match_data.get('ranks', [])
 
     def show_error(self, err_msg):
+        if "사용자에 의해 취소" in err_msg:
+            self.on_scraping_finished(has_error=True)
+            return
+            
         InfoBar.error("작업 중단", err_msg, duration=5000, position=InfoBarPosition.TOP, parent=self)
         self.on_scraping_finished(has_error=True)
 
