@@ -249,3 +249,93 @@ class ScheduleAddDialog(QDialog):
             
         return start_str, end_str, self.input_edit.text().strip()
 
+
+class FavoriteEditDialog(QDialog):
+    def __init__(self, data=None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("즐겨찾기 수정")
+        self.setFixedSize(350, 320)
+        
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(24, 24, 24, 24)
+        self.layout.setSpacing(14)
+        
+        self.title_label = SubtitleLabel("즐겨찾기 설정", self)
+        self.layout.addWidget(self.title_label)
+        
+        self.inputs = {}
+        
+        # 키워드
+        lbl_kw = QLabel("검색 키워드", self)
+        lbl_kw.setFont(QFont("SUIT", 10, QFont.Bold))
+        self.layout.addWidget(lbl_kw)
+        self.inputs['keyword'] = LineEdit(self)
+        self.inputs['keyword'].setPlaceholderText("예: 부산 성형외과")
+        if data and 'keyword' in data:
+            self.inputs['keyword'].setText(data['keyword'])
+        self.layout.addWidget(self.inputs['keyword'])
+        
+        # 업체명
+        lbl_cp = QLabel("목표 업체명", self)
+        lbl_cp.setFont(QFont("SUIT", 10, QFont.Bold))
+        self.layout.addWidget(lbl_cp)
+        self.inputs['company'] = LineEdit(self)
+        self.inputs['company'].setPlaceholderText("예: 푸름애드 의원")
+        if data and 'company' in data:
+            self.inputs['company'].setText(data['company'])
+        self.layout.addWidget(self.inputs['company'])
+        
+        # 탐색 개수
+        lbl_cnt = QLabel("탐색 목표 개수", self)
+        lbl_cnt.setFont(QFont("SUIT", 10, QFont.Bold))
+        self.layout.addWidget(lbl_cnt)
+        self.inputs['count'] = SpinBox(self)
+        self.inputs['count'].setRange(1, 150)
+        self.inputs['count'].setValue(data.get('count', 50) if data else 50)
+        self.layout.addWidget(self.inputs['count'])
+        
+        self.layout.addStretch(1)
+        
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(12)
+        btn_layout.addStretch(1)
+        
+        self.ok_btn = PrimaryPushButton("저장", self)
+        self.ok_btn.clicked.connect(self.accept)
+        
+        self.cancel_btn = PushButton("취소", self)
+        self.cancel_btn.clicked.connect(self.reject)
+        
+        btn_layout.addWidget(self.ok_btn)
+        btn_layout.addWidget(self.cancel_btn)
+        
+        self.layout.addLayout(btn_layout)
+        
+        self.update_style()
+        qconfig.themeChanged.connect(self.update_style)
+        
+    def update_style(self):
+        is_dark = isDarkTheme()
+        bg_color = "#202020" if is_dark else "#FFFFFF"
+        text_color = "#FFFFFF" if is_dark else "#000000"
+        
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {bg_color};
+            }}
+        """)
+        self.title_label.setStyleSheet(f"color: {text_color}; background: transparent;")
+        
+    def get_data(self):
+        return {
+            'keyword': self.inputs['keyword'].text().strip(),
+            'company': self.inputs['company'].text().strip(),
+            'count': self.inputs['count'].value()
+        }
+        
+    def closeEvent(self, event):
+        try:
+            qconfig.themeChanged.disconnect(self.update_style)
+        except Exception:
+            pass
+        super().closeEvent(event)

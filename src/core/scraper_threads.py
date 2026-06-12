@@ -1019,9 +1019,14 @@ class PlaceScraperWorker(QThread):
         from selenium.webdriver.chrome.service import Service
         import gspread
         from oauth2client.service_account import ServiceAccountCredentials
+        has_error = False
+        error_msg = ""
+        is_early_return = False
         try:
             if not self.keyword.strip() or not self.target_company.strip():
-                self.signals.error.emit("키워드와 목표 업체명을 모두 입력해주세요.")
+                error_msg = "키워드와 목표 업체명을 모두 입력해주세요."
+                has_error = True
+                is_early_return = True
                 return
 
             self.log(f"=== 키워드: '{self.keyword}', 목표 업체명: '{self.target_company}' ===")
@@ -1032,7 +1037,9 @@ class PlaceScraperWorker(QThread):
             
             patched_driver_path = self.get_patched_chromedriver()
             if not patched_driver_path:
-                self.signals.error.emit("크롬 드라이버를 찾을 수 없거나 패치할 수 없습니다.")
+                error_msg = "크롬 드라이버를 찾을 수 없거나 패치할 수 없습니다."
+                has_error = True
+                is_early_return = True
                 return
 
             # 공통 크롬 옵션 (봇 탐지 회피용)
@@ -1158,12 +1165,15 @@ class PlaceScraperWorker(QThread):
             self.log(result_text)
             self.log(f"▶ 기록 준비 완료: {sim_rank}")
             
-            self.signals.finished.emit()
-
         except Exception as e:
             self.log(f"[메인 오류] {e}")
             traceback.print_exc()
-            self.signals.error.emit(str(e))
+            error_msg = str(e)
+            has_error = True
         finally:
             self.cleanup_drivers()
+            if has_error:
+                self.signals.error.emit(error_msg)
+            elif not is_early_return:
+                self.signals.finished.emit()
 

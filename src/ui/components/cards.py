@@ -809,3 +809,146 @@ class ScheduleItemWidget(QFrame):
         menu.addAction(delete_action)
         menu.exec(event.globalPos())
 
+class FavoritePlaceCard(QFrame):
+    double_clicked = pyqtSignal(int)
+    single_clicked = pyqtSignal(int)
+    
+    def __init__(self, index, data, parent=None):
+        super().__init__(parent)
+        self.index = index
+        self.data = data
+        self.status = "idle" # idle, queued, running, done
+        self.setObjectName("FavoritePlaceCard")
+        
+        self.setFixedSize(140, 100)
+        self.setCursor(Qt.PointingHandCursor)
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(4)
+        
+        self.keyword_label = QLabel(self.data.get('keyword', '설정 안됨'), self)
+        self.keyword_label.setFont(QFont("SUIT", 10, QFont.Bold))
+        self.keyword_label.setAlignment(Qt.AlignCenter)
+        self.keyword_label.setWordWrap(True)
+        
+        self.company_label = QLabel(self.data.get('company', '더블클릭하여 설정'), self)
+        self.company_label.setFont(QFont("SUIT", 9))
+        self.company_label.setAlignment(Qt.AlignCenter)
+        self.company_label.setWordWrap(True)
+        
+        self.result_label = QLabel("", self)
+        self.result_label.setFont(QFont("SUIT", 11, QFont.Bold))
+        self.result_label.setAlignment(Qt.AlignCenter)
+        self.result_label.setStyleSheet("color: #60CDFF; background: transparent; border: none;")
+        self.result_label.hide()
+        
+        self.loading_ring = IndeterminateProgressRing(self)
+        self.loading_ring.setFixedSize(20, 20)
+        self.loading_ring.hide()
+        
+        top_layout = QHBoxLayout()
+        top_layout.addStretch(1)
+        top_layout.addWidget(self.loading_ring)
+        top_layout.addStretch(1)
+        
+        layout.addStretch(1)
+        layout.addWidget(self.keyword_label)
+        layout.addWidget(self.company_label)
+        layout.addLayout(top_layout)
+        layout.addWidget(self.result_label)
+        layout.addStretch(1)
+        
+        self.update_style()
+        qconfig.themeChanged.connect(self.update_style)
+        
+    def update_style(self):
+        is_dark = isDarkTheme()
+        
+        if self.status == "queued":
+            bg_color = "#3A2E12" if is_dark else "#FFF4CE"
+            border_color = "#FFA000"
+            text_color = "#FFFFFF" if is_dark else "#000000"
+        elif self.status == "running":
+            bg_color = "#1E2D3D" if is_dark else "#CCE4F7"
+            border_color = "#0078D4"
+            text_color = "#FFFFFF" if is_dark else "#000000"
+        else:
+            bg_color = "#2C2C2C" if is_dark else "#F3F3F3"
+            border_color = "#3A3A3A" if is_dark else "#E5E5E5"
+            text_color = "#FFFFFF" if is_dark else "#000000"
+            
+        sub_text_color = "#CCCCCC" if is_dark else "#333333"
+        hover_bg = "#383838" if is_dark else "#EBEBEB"
+        if self.status in ["queued", "running"]:
+            hover_bg = bg_color # No hover change while running/queued
+            
+        self.setStyleSheet(f"""
+            QFrame#FavoritePlaceCard {{
+                background-color: {bg_color};
+                border: 1px solid {border_color};
+                border-radius: 12px;
+            }}
+            QFrame#FavoritePlaceCard:hover {{
+                background-color: {hover_bg};
+            }}
+        """)
+        self.keyword_label.setStyleSheet(f"color: {text_color}; background: transparent; border: none;")
+        self.company_label.setStyleSheet(f"color: {sub_text_color}; background: transparent; border: none;")
+        
+    def update_data(self, data):
+        self.data = data
+        self.keyword_label.setText(self.data.get('keyword', '설정 안됨') or '설정 안됨')
+        self.company_label.setText(self.data.get('company', '더블클릭하여 설정') or '더블클릭하여 설정')
+        self.set_status("idle")
+        
+    def set_status(self, status, ranks=None):
+        self.status = status
+        if status == "running":
+            self.loading_ring.start()
+            self.loading_ring.show()
+            self.result_label.hide()
+        elif status == "queued":
+            self.loading_ring.stop()
+            self.loading_ring.hide()
+            self.result_label.setText("대기 중")
+            self.result_label.setStyleSheet("color: #FFA000; background: transparent; border: none;")
+            self.result_label.show()
+        elif status == "done":
+            self.loading_ring.stop()
+            self.loading_ring.hide()
+            if ranks:
+                rank_str = ", ".join([f"{r}위" for r in ranks])
+                self.result_label.setText(rank_str)
+                self.result_label.setStyleSheet("color: #60CDFF; background: transparent; border: none;")
+            else:
+                self.result_label.setText("미노출")
+                self.result_label.setStyleSheet("color: #FF6B6B; background: transparent; border: none;")
+            self.result_label.show()
+        else:
+            self.loading_ring.stop()
+            self.loading_ring.hide()
+            self.result_label.hide()
+            
+        self.update_style()
+        
+    def mouseDoubleClickEvent(self, event):
+        super().mouseDoubleClickEvent(event)
+        self.double_clicked.emit(self.index)
+        
+    def mousePressEvent(self, event):
+        super().mousePressEvent(event)
+        
+    def mouseReleaseEvent(self, event):
+        super().mouseReleaseEvent(event)
+        # Avoid triggering single click if status is already running or queued
+        # Wait, if double click is fired, mouseRelease might also fire. Let's just emit on single.
+        if self.status == "idle" and self.data.get('keyword'):
+            self.single_clicked.emit(self.index)
+            
+    def closeEvent(self, event):
+        try:
+            qconfig.themeChanged.disconnect(self.update_style)
+        except Exception:
+            pass
+        super().closeEvent(event)

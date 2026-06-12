@@ -16,7 +16,8 @@ from qfluentwidgets import (PushButton, PrimaryPushButton, ComboBox, SpinBox, Sw
                             BodyLabel, IconWidget, HyperlinkButton, PasswordLineEdit, CheckBox, NavigationPushButton, RoundMenu, Action)
 from qfluentwidgets.common.icon import drawIcon
 from src.core.scraper_threads import DriverInitWorker, PlaceScraperWorker
-from src.ui.components.cards import PlaceExposureCard
+from src.ui.components.cards import PlaceExposureCard, FavoritePlaceCard
+from src.ui.components.dialogs import FavoriteEditDialog
 from src.config import SESSION, WORKSPACE_DIR, ASSETS_DIR, DATA_DIR, FONT_DIR, SETTINGS_PATH, CREDENTIALS_PATH
 
 class PlaceScraperInterface(QWidget):
@@ -24,9 +25,36 @@ class PlaceScraperInterface(QWidget):
         super().__init__(parent=parent)
         self.setObjectName("PlaceScraperInterface")
         self.global_driver_path = ""
+        self.favorites_data = []
+        self.favorite_cards = []
+        self.task_queue = []
+        self.current_task = None
         
+        self.load_favorites()
         self.init_ui()
         self.check_environment()
+        
+    def load_favorites(self):
+        self.favorites_path = os.path.join(DATA_DIR, "place_favorites.json")
+        if os.path.exists(self.favorites_path):
+            try:
+                with open(self.favorites_path, 'r', encoding='utf-8') as f:
+                    self.favorites_data = json.load(f)
+            except Exception:
+                self.favorites_data = [{} for _ in range(12)]
+        else:
+            self.favorites_data = [{} for _ in range(12)]
+            
+        while len(self.favorites_data) < 12:
+            self.favorites_data.append({})
+            
+    def save_favorites(self):
+        os.makedirs(DATA_DIR, exist_ok=True)
+        try:
+            with open(self.favorites_path, 'w', encoding='utf-8') as f:
+                json.dump(self.favorites_data, f, ensure_ascii=False, indent=4)
+        except Exception as e:
+            print(f"Failed to save favorites: {e}")
 
     def init_ui(self):
         main_layout = QVBoxLayout(self)
@@ -120,6 +148,26 @@ class PlaceScraperInterface(QWidget):
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(12)
         
+        fav_title = SubtitleLabel("즐겨찾기")
+        fav_title.setFont(QFont("SUIT", 12, QFont.Bold))
+        right_layout.addWidget(fav_title)
+        
+        self.fav_grid = QGridLayout()
+        self.fav_grid.setSpacing(8)
+        
+        for i in range(12):
+            card = FavoritePlaceCard(i, self.favorites_data[i], self)
+            card.double_clicked.connect(self.edit_favorite)
+            card.single_clicked.connect(self.queue_favorite_task)
+            row = i // 4
+            col = i % 4
+            self.fav_grid.addWidget(card, row, col)
+            self.favorite_cards.append(card)
+            
+        right_layout.addLayout(self.fav_grid)
+        
+        right_layout.addSpacing(16)
+        
         right_title = SubtitleLabel("실시간 노출 현황")
         right_title.setFont(QFont("SUIT", 12, QFont.Bold))
         right_layout.addWidget(right_title)
@@ -197,40 +245,114 @@ class PlaceScraperInterface(QWidget):
         self.append_log(f"[치명적 오류] 크롬 드라이버 설치 실패: {err_msg}")
         InfoBar.error("오류", "크롬 드라이버를 설치할 수 없습니다.", duration=5000, position=InfoBarPosition.TOP, parent=self)
 
-    def start_scraping(self):
-        keyword = self.keyword_input.text()
-        company = self.company_input.text()
+    def edit_favorite(self, index):
+        dialog = FavoriteEditDialog(self.favorites_data[index], self)
+        if dialog.exec_():
+            data = dialog.get_data()
+            self.favorites_data[index] = data
+            self.save_favorites()
+            self.favorite_cards[index].update_data(data)
+
+    def queue_favorite_task(self, index):
+        data = self.favorites_data[index]
+        keyword = data.get('keyword', '')
+        company = data.get('company', '')
+        count = data.get('count', 50)
         
-        if not keyword.strip() or not company.strip():
+        if not keyword or not company:
+            InfoBar.warning("입력 필요", "키워드와 업체명을 모두 설정해주세요.", duration=3000, parent=self)
+            return
+            
+        task = {
+            'type': 'favorite',
+            'index': index,
+            'keyword': keyword,
+            'company': company,
+            'count': count
+        }
+        self.task_queue.append(task)
+        self.favorite_cards[index].set_status("queued")
+        self.append_log(f"[대기열 추가] 즐겨찾기 {index+1}번: '{keyword}' / '{company}'")
+        self.start_btn.setEnabled(False)
+        self.process_next_task()
+
+    def start_scraping(self):
+        keyword = self.keyword_input.text().strip()
+        company = self.company_input.text().strip()
+        
+        if not keyword or not company:
             InfoBar.error("입력 오류", "검색 키워드와 목표 업체명을 모두 입력해주세요.", duration=3000, position=InfoBarPosition.TOP, parent=self)
             return
 
+        display_count = self.count_spinbox.value()
+        
+        task = {
+            'type': 'manual',
+            'keyword': keyword,
+            'company': company,
+            'count': display_count
+        }
+        self.task_queue.append(task)
+        self.append_log(f"[대기열 추가] 수동 검색: '{keyword}' / '{company}'")
         self.start_btn.setEnabled(False)
+        self.process_next_task()
+
+    def process_next_task(self):
+        if hasattr(self, 'worker') and self.worker and self.worker.isRunning():
+            return
+            
+        if not self.task_queue:
+            self.start_btn.setEnabled(True)
+            self.append_log("\n[안내] 모든 대기열 작업이 종료되었습니다.")
+            InfoBar.success("완료", "모든 순위 체크 작업이 종료되었습니다.", duration=4000, position=InfoBarPosition.TOP, parent=self)
+            return
+            
+        self.current_task = self.task_queue.pop(0)
+        
         self.keyword_input.setEnabled(False)
         self.company_input.setEnabled(False)
         self.count_spinbox.setEnabled(False)
-        self.console_output.clear()
+        self.start_btn.setEnabled(False)
         
-        display_count = self.count_spinbox.value()
-
+        if self.current_task['type'] == 'favorite':
+            self.favorite_cards[self.current_task['index']].set_status("running")
+            
         self.worker = PlaceScraperWorker(
-            keyword, company, display_count, self.global_driver_path
+            self.current_task['keyword'], 
+            self.current_task['company'], 
+            self.current_task['count'], 
+            self.global_driver_path
         )
         self.worker.signals.log.connect(self.append_log)
         self.worker.signals.error.connect(self.show_error)
-        self.worker.signals.match_found.connect(self.add_exposure_card)
+        self.worker.signals.match_found.connect(self.on_match_found)
         self.worker.signals.finished.connect(self.on_scraping_finished)
         self.worker.start()
 
+    def on_match_found(self, match_data):
+        self.add_exposure_card(match_data)
+        if self.current_task and self.current_task['type'] == 'favorite':
+            self.current_task['ranks'] = match_data.get('ranks', [])
+
     def show_error(self, err_msg):
         InfoBar.error("작업 중단", err_msg, duration=5000, position=InfoBarPosition.TOP, parent=self)
-        self.on_scraping_finished()
+        self.on_scraping_finished(has_error=True)
 
-    def on_scraping_finished(self):
-        self.start_btn.setEnabled(True)
+    def on_scraping_finished(self, has_error=False):
+        if self.current_task and self.current_task['type'] == 'favorite':
+            ranks = self.current_task.get('ranks', [])
+            if has_error:
+                self.favorite_cards[self.current_task['index']].set_status("idle")
+            else:
+                self.favorite_cards[self.current_task['index']].set_status("done", ranks)
+                
+        if hasattr(self, 'worker') and self.worker:
+            self.worker.deleteLater()
+            self.worker = None
+            
+        self.current_task = None
         self.keyword_input.setEnabled(True)
         self.company_input.setEnabled(True)
         self.count_spinbox.setEnabled(True)
-        self.append_log("\n[안내] 순위 체크가 종료되었습니다.")
-        InfoBar.success("완료", "플레이스 순위 체크 작업이 성공적으로 종료되었습니다.", duration=4000, position=InfoBarPosition.TOP, parent=self)
-
+        
+        self.process_next_task()
