@@ -5,15 +5,22 @@ VERSION = "1.1"
 
 # Base Path Logic
 if getattr(sys, 'frozen', False):
-    BASE_DIR = os.path.dirname(sys.executable)
+    # .exe 파일이 위치한 경로
+    EXE_DIR = os.path.dirname(sys.executable)
+    # PyInstaller --onefile 모드 내부 임시 압축해제 경로
+    if hasattr(sys, '_MEIPASS'):
+        INTERNAL_DIR = sys._MEIPASS
+    else:
+        INTERNAL_DIR = EXE_DIR
 else:
-    # If config.py is inside src/, BASE_DIR should be the parent folder
-    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    EXE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    INTERNAL_DIR = EXE_DIR
 
-WORKSPACE_DIR = os.path.join(BASE_DIR, "Workspace")
-ASSETS_DIR = os.path.join(BASE_DIR, "assets")
-DATA_DIR = os.path.join(BASE_DIR, "Data")
-FONT_DIR = os.path.join(BASE_DIR, "Font")
+WORKSPACE_DIR = os.path.join(EXE_DIR, "Workspace")
+DATA_DIR = os.path.join(EXE_DIR, "Data")
+
+ASSETS_DIR = os.path.join(INTERNAL_DIR, "assets")
+FONT_DIR = os.path.join(INTERNAL_DIR, "Font")
 
 SETTINGS_PATH = os.path.join(WORKSPACE_DIR, "settings.json")
 CREDENTIALS_PATH = os.path.join(WORKSPACE_DIR, "credentials.json")

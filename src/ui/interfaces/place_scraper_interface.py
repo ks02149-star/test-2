@@ -61,8 +61,21 @@ class PlaceScraperInterface(QWidget):
         main_layout.setContentsMargins(36, 36, 36, 36)
         main_layout.setSpacing(16)
 
+        title_layout = QHBoxLayout()
         self.title_label = TitleLabel("플레이스 순위 체크")
-        main_layout.addWidget(self.title_label)
+        title_layout.addWidget(self.title_label)
+        
+        title_layout.addStretch(1)
+        
+        self.sheet_link_btn = HyperlinkButton(
+            "https://docs.google.com/spreadsheets/d/17V0qlJg4hmpo1rLS5oAq9UPkFO6kQ1iMnovERV9PTOs/edit?gid=526124036#gid=526124036",
+            "기록 시트 열기 (구글 스프레드시트)",
+            self
+        )
+        self.sheet_link_btn.setFont(QFont("SUIT", 11, QFont.Bold))
+        title_layout.addWidget(self.sheet_link_btn)
+        
+        main_layout.addLayout(title_layout)
 
         split_layout = QHBoxLayout()
         split_layout.setSpacing(24)

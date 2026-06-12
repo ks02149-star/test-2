@@ -5,30 +5,41 @@ import subprocess
 
 def main():
     print("========================================================")
-    print("푸름애드 관리프로그램 빌드 스크립트 (PyInstaller)")
+    print("푸름애드 관리프로그램 완벽 배포용 빌드 스크립트")
     print("========================================================")
     print()
 
-    print("1. PyInstaller 설치 확인 중...")
-    subprocess.call([sys.executable, "-m", "pip", "install", "pyinstaller"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    print("1. 패키징에 필요한 도구들을 설치합니다...")
+    subprocess.call([sys.executable, "-m", "pip", "install", "--upgrade", "pip"])
+    subprocess.call([sys.executable, "-m", "pip", "install", "pyinstaller"])
+    if os.path.exists("requirements.txt"):
+        subprocess.call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
+    
+    # Install additional required packages
+    subprocess.call([sys.executable, "-m", "pip", "install", "PyQt5", "PyQtWebEngine", "PyQt-Fluent-Widgets", "selenium", "pandas", "openpyxl", "gspread", "oauth2client", "webdriver-manager"])
 
-    print("2. 기존 빌드 폴더 삭제 중 (초기화)...")
+    print("\n2. 기존 빌드 찌꺼기 청소...")
     if os.path.exists("build"):
-        shutil.rmtree("build")
-    if os.path.exists("dist/푸름애드_관리프로그램"):
-        shutil.rmtree("dist/푸름애드_관리프로그램")
-    if os.path.exists("main.spec"):
-        os.remove("main.spec")
+        shutil.rmtree("build", ignore_errors=True)
+    if os.path.exists("dist"):
+        shutil.rmtree("dist", ignore_errors=True)
+    for f in os.listdir("."):
+        if f.endswith(".spec"):
+            try:
+                os.remove(f)
+            except:
+                pass
 
-    print("3. PyInstaller 패키징 시작...")
+    print("\n3. 단일 실행파일(.exe) 생성 시작! (잠시만 기다려주세요...)")
     pyinstaller_args = [
         "pyinstaller",
         "--noconfirm",
-        "--onedir",
+        "--onefile",
         "--windowed",
-        "--noconsole",
         "--name", "푸름애드_관리프로그램",
-        "--paths", ".",
+        "--add-data", f"assets{os.pathsep}assets/",
+        "--add-data", f"Font{os.pathsep}Font/",
+        "--collect-all", "qfluentwidgets",
         "--collect-all", "selenium",
         "--collect-all", "webdriver_manager",
         "--hidden-import", "PyQt5.QtWebEngineWidgets",
@@ -39,28 +50,27 @@ def main():
         "src/main.py"
     ]
     
-    # Run pyinstaller via subprocess
     subprocess.check_call(pyinstaller_args)
 
-    print("\n4. 필수 외부 자산 복사 중...")
-    target_dir = "dist/푸름애드_관리프로그램"
+    print("\n4. 프로그램과 함께 배포해야 할 기본 파일 복사 중...")
+    if not os.path.exists("dist"):
+        os.makedirs("dist")
     
-    if os.path.exists("assets"):
-        shutil.copytree("assets", os.path.join(target_dir, "assets"), dirs_exist_ok=True)
-    if os.path.exists("Font"):
-        shutil.copytree("Font", os.path.join(target_dir, "Font"), dirs_exist_ok=True)
-    if os.path.exists("키워드_순위_작업표.xlsx"):
-        shutil.copy2("키워드_순위_작업표.xlsx", target_dir)
     if os.path.exists("credentials.json"):
-        shutil.copy2("credentials.json", target_dir)
+        shutil.copy2("credentials.json", "dist/credentials.json")
+    if os.path.exists("키워드_순위_작업표.xlsx"):
+        shutil.copy2("키워드_순위_작업표.xlsx", "dist/키워드_순위_작업표.xlsx")
 
     print("\n========================================================")
     print("빌드가 성공적으로 완료되었습니다!")
-    print("배포 방법:")
-    print("1. 현재 폴더 안의 'dist' 폴더 안에 들어가시면 '푸름애드_관리프로그램' 폴더가 있습니다.")
-    print("2. 해당 폴더('푸름애드_관리프로그램')를 통째로 압축(zip)하여 다른 PC로 전달하시면 됩니다.")
-    print("3. 전달받은 PC에서는 압축을 풀고 그 안의 '푸름애드_관리프로그램.exe'를 실행하면 되며,")
-    print("   같은 폴더에 '키워드_순위_작업표.xlsx'도 함께 들어있어 바로 사용 가능합니다.")
+    print("[배포 방법]")
+    print("1. 현재 폴더에 생긴 'dist' 폴더 안으로 들어가세요.")
+    print("2. 그 안에 있는 파일들을 압축(Zip)하여 다른 컴퓨터에 전달하시면 됩니다.")
+    print("   - 푸름애드_관리프로그램.exe (본체)")
+    print("   - credentials.json (구글 시트 연동 파일, 있는 경우에만)")
+    print("   - 키워드_순위_작업표.xlsx (있는 경우에만)")
+    print()
+    print("* 다른 사람 컴퓨터에 파이썬이 설치되어 있지 않아도 완벽하게 작동합니다!")
     print("========================================================")
 
 if __name__ == "__main__":

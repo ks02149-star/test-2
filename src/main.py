@@ -14,7 +14,7 @@ sys.excepthook = custom_excepthook
 install_required_packages()
 
 # Load paths and global config
-from src.config import BASE_DIR, FONT_DIR
+from src.config import FONT_DIR
 
 def check_for_updates():
     # Keep the existing logic but gracefully fail since it's just a placeholder usually
