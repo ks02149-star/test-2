@@ -1,7 +1,111 @@
 import requests
 from packaging.version import parse as parse_version
 from src.config import VERSION
-def perform_update(): pass
+def perform_update(release_info=None):
+    if not release_info:
+        return
+        
+    import os, sys, tempfile, subprocess
+    import requests
+    from PyQt5.QtWidgets import QMessageBox, QProgressDialog, QApplication
+    from PyQt5.QtCore import Qt
+
+    if not getattr(sys, 'frozen', False):
+        import webbrowser
+        QMessageBox.information(None, "안내", "개발 환경에서는 자동 업데이트가 지원되지 않습니다.\n다운로드 페이지로 이동합니다.")
+        webbrowser.open(release_info.get("html_url", "https://github.com/ks02149-star/test-2/releases/latest"))
+        return
+
+    # 1. 릴리즈에서 .exe 파일 URL 찾기
+    download_url = None
+    assets = release_info.get("assets", [])
+    for asset in assets:
+        if asset.get("name", "").endswith(".exe"):
+            download_url = asset.get("browser_download_url")
+            break
+            
+    if not download_url:
+        QMessageBox.critical(None, "오류", "최신 릴리즈에서 설치 파일(.exe)을 찾을 수 없습니다.")
+        return
+
+    # 2. 다운로드 및 진행률 표시
+    try:
+        progress = QProgressDialog("최신 버전을 다운로드 중입니다...", "취소", 0, 100, None)
+        progress.setWindowTitle("업데이트")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+        
+        response = requests.get(download_url, stream=True)
+        response.raise_for_status()
+        total_size = int(response.headers.get('content-length', 0))
+        
+        temp_dir = tempfile.gettempdir()
+        new_exe_path = os.path.join(temp_dir, "update_new.exe")
+        
+        downloaded_size = 0
+        with open(new_exe_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size=1048576): # 1MB 단위로 큼직하게 받아 다운로드 속도 대폭 향상 (서버 끊김 방지)
+                if progress.wasCanceled():
+                    return
+                if chunk:
+                    f.write(chunk)
+                    downloaded_size += len(chunk)
+                    if total_size > 0:
+                        percent = int((downloaded_size / total_size) * 100)
+                        progress.setValue(percent)
+                    QApplication.processEvents()
+                    
+        # 깃허브 서버 문제나 인터넷 불안정으로 파일이 중간에 끊긴 채 다운로드 완료 처리되는 것을 원천 차단
+        if total_size > 0 and downloaded_size < total_size:
+            raise Exception(f"다운로드가 중간에 끊겼습니다. (받은 용량: {downloaded_size} / 전체: {total_size})\\n다시 시도해주세요.")
+            
+        progress.setValue(100)
+
+        # 3. 덮어쓰기용 배치 스크립트 생성 및 실행
+        current_exe = sys.executable
+        pid = os.getpid()
+        meipass = getattr(sys, '_MEIPASS', '')
+        bat_path = os.path.join(temp_dir, "update_script.bat")
+        
+        with open(bat_path, "w", encoding="mbcs") as f:
+            f.write('@echo off\n')
+            f.write('setlocal enabledelayedexpansion\n')
+            f.write('timeout /t 1 /nobreak > nul\n')
+            f.write('set max_retries=15\n')
+            f.write('set count=0\n')
+            f.write(':retry\n')
+            f.write(f'copy /y "{new_exe_path}" "{current_exe}" > nul 2>&1\n')
+            f.write('if %errorlevel% neq 0 (\n')
+            f.write('    set /a count+=1\n')
+            f.write('    if !count! geq %max_retries% goto fail\n')
+            f.write('    timeout /t 1 /nobreak > nul\n')
+            f.write('    goto retry\n')
+            f.write(')\n')
+            
+            # 기존 프로세스가 찌꺼기(반쯤 지워진 임시 폴더)를 남기고 죽는 PyInstaller 버그 원천 차단
+            # 구버전이 쓰던 MEI 임시 폴더 경로를 추적하여 스크립트가 직접 강제로 박살냄
+            f.write('timeout /t 2 /nobreak > nul\n')
+            if meipass:
+                f.write(f'rmdir /s /q "{meipass}" > nul 2>&1\n')
+                
+            f.write(f'start "" "{current_exe}"\n')
+            f.write('goto cleanup\n')
+            f.write(':fail\n')
+            f.write(f'start "" "{current_exe}"\n')
+            f.write(':cleanup\n')
+            f.write(f'del "{new_exe_path}"\n')
+            f.write('del "%~f0"\n')
+            
+        # 경로 띄어쓰기 인식 오류를 원천 차단하기 위해 리스트 형태로 전달
+        subprocess.Popen([bat_path], creationflags=subprocess.CREATE_NO_WINDOW)
+        
+        # 일반 종료(sys.exit) 시 임시 폴더를 삭제하느라 시간이 끌리고, 
+        # 삭제 도중 새 프로그램이 켜지면 DLL 파일이 깨지는 현상이 발생하므로 즉시 강제 종료(os._exit) 사용
+        os._exit(0)
+        
+    except Exception as e:
+        QMessageBox.critical(None, "다운로드 오류", f"업데이트 파일을 받는 중 오류가 발생했습니다:\n{str(e)}")
 import sys
 import os
 import traceback
@@ -111,7 +215,7 @@ cv.DayScrollView.__init__ = new_init
 
 def check_for_updates(manual_check=False):
     try:
-        response = requests.get("https://api.github.com/repos/ks02149-star/test-2/releases/latest", timeout=5)
+        response = requests.get("https://api.github.com/repos/ks02149-star/test-2/releases/latest", timeout=10)
         response.raise_for_status()
         latest_release = response.json()
         latest_tag = latest_release.get("tag_name", "")
@@ -129,10 +233,14 @@ def check_for_updates(manual_check=False):
             if manual_check:
                 from PyQt5.QtWidgets import QMessageBox
                 QMessageBox.information(None, "업데이트", "현재 최신 버전을 사용 중입니다.")
+    except requests.exceptions.Timeout:
+        if manual_check:
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.warning(None, "응답 지연", "업데이트 서버 응답이 지연되고 있습니다.\n잠시 후 다시 시도해주세요.")
     except Exception as e:
         if manual_check:
             from PyQt5.QtWidgets import QMessageBox
-            QMessageBox.critical(None, "오류", f"업데이트 확인 중 오류가 발생했습니다:\n{str(e)}")
+            QMessageBox.critical(None, "오류", f"업데이트 확인 중 오류가 발생했습니다:\n{str(e)}\n\n인터넷 연결 상태를 확인해주세요.")
 
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, 
