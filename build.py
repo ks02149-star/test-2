@@ -53,6 +53,8 @@ def main():
         "--hidden-import", "oauth2client",
         "--hidden-import", "requests",
         "--hidden-import", "bs4",
+        "--hidden-import", "_overlapped",
+        "--hidden-import", "asyncio",
         "src/main.py"
     ]
     

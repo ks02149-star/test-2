@@ -1,6 +1,13 @@
 import sys
 import os
 
+# PyInstaller 강제 포함을 위한 명시적 임포트
+try:
+    import asyncio
+    import _overlapped
+except ImportError:
+    pass
+
 # Suppress harmless PyQt5 Qt QPA warnings caused by invalid OS fonts
 os.environ["QT_LOGGING_RULES"] = "qt.qpa.fonts.warning=false"
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -20,7 +27,18 @@ def check_for_updates():
     # Keep the existing logic but gracefully fail since it's just a placeholder usually
     pass
 
+def cleanup_before_exit():
+    import subprocess
+    try:
+        # 남아있는 드라이버 프로세스를 강제로 종료하여 파일 잠금을 해제합니다.
+        subprocess.run(["taskkill", "/F", "/IM", "chromedriver.exe", "/T"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["taskkill", "/F", "/IM", "chromedriver_patched.exe", "/T"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except:
+        pass
+
 def main():
+    import multiprocessing
+    multiprocessing.freeze_support()
     try:
         QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     except AttributeError:
@@ -30,6 +48,7 @@ def main():
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps)
 
     app = QApplication(sys.argv)
+    app.aboutToQuit.connect(cleanup_before_exit)
     
     loaded_family = "SUIT"
     if os.path.exists(FONT_DIR):
@@ -60,13 +79,31 @@ def main():
     from src.ui.login_dialog import LoginDialog
     from src.ui.main_window import MainWindow
 
-    login_dialog = LoginDialog()
-    if login_dialog.exec_() == QDialog.Accepted:
-        window = MainWindow()
-        window.show()
-        sys.exit(app.exec_())
-    else:
-        sys.exit(0)
+    # 프로세스 재시작 없이 내부 루프로 로그아웃/로그인 전환
+    while True:
+        app.wants_restart = False
+        
+        # 로그인 창은 Light 테마 기본값을 사용하도록 초기화
+        from qfluentwidgets import setTheme, Theme, setThemeColor
+        setTheme(Theme.LIGHT)
+        setThemeColor('#009faa')
+        
+        login_dialog = LoginDialog()
+        if login_dialog.exec_() == QDialog.Accepted:
+            window = MainWindow()
+            window.show()
+            app.exec_()
+            
+            if getattr(app, 'wants_restart', False):
+                window.deleteLater()
+                login_dialog.deleteLater()
+                continue
+            else:
+                break
+        else:
+            break
+
+    sys.exit(0)
 
 if __name__ == '__main__':
     main()

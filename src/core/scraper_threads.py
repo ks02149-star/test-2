@@ -23,8 +23,15 @@ import tempfile
 import threading
 import requests
 from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject
 from src.config import SESSION, WORKSPACE_DIR, ASSETS_DIR, DATA_DIR, SETTINGS_PATH, CREDENTIALS_PATH
+
+import openpyxl
+from openpyxl.styles import Font, PatternFill, Alignment
+from webdriver_manager.chrome import ChromeDriverManager
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 
 class WorkerSignals(QObject):
     log = pyqtSignal(str)
@@ -38,18 +45,6 @@ class DriverInitWorker(QThread):
     error = pyqtSignal(str)
 
     def run(self):
-        import pandas as pd
-        import openpyxl
-        from openpyxl.styles import Font, PatternFill, Alignment
-        from selenium import webdriver
-        from selenium.webdriver.common.by import By
-        from selenium.webdriver.support.ui import WebDriverWait
-        from selenium.webdriver.support import expected_conditions as EC
-        from selenium.common.exceptions import TimeoutException
-        from webdriver_manager.chrome import ChromeDriverManager
-        from selenium.webdriver.chrome.service import Service
-        import gspread
-        from oauth2client.service_account import ServiceAccountCredentials
         try:
             import os, re
             from webdriver_manager.chrome import ChromeDriverManager
@@ -330,18 +325,7 @@ class ScraperWorker(QThread):
         return "미노출 (범위 밖)"
 
     def run(self):
-        import pandas as pd
-        import openpyxl
-        from openpyxl.styles import Font, PatternFill, Alignment
-        from selenium import webdriver
-        from selenium.webdriver.common.by import By
-        from selenium.webdriver.support.ui import WebDriverWait
-        from selenium.webdriver.support import expected_conditions as EC
-        from selenium.common.exceptions import TimeoutException
-        from webdriver_manager.chrome import ChromeDriverManager
-        from selenium.webdriver.chrome.service import Service
-        import gspread
-        from oauth2client.service_account import ServiceAccountCredentials
+
         try:
             df_input = pd.read_excel(self.excel_path, sheet_name=self.selected_sheet)
             required_columns = ['키워드', '목표블로그', '관련도순_순위', '최근조회일시']
@@ -483,18 +467,6 @@ class NewsWorker(QThread):
     error = pyqtSignal(str)
 
     def run(self):
-        import pandas as pd
-        import openpyxl
-        from openpyxl.styles import Font, PatternFill, Alignment
-        from selenium import webdriver
-        from selenium.webdriver.common.by import By
-        from selenium.webdriver.support.ui import WebDriverWait
-        from selenium.webdriver.support import expected_conditions as EC
-        from selenium.common.exceptions import TimeoutException
-        from webdriver_manager.chrome import ChromeDriverManager
-        from selenium.webdriver.chrome.service import Service
-        import gspread
-        from oauth2client.service_account import ServiceAccountCredentials
         url = "https://www.dmktnews.com/kwa-home"
         try:
             headers = {"User-Agent": "Mozilla/5.0"}
@@ -536,18 +508,7 @@ class StatsScraperWorker(QThread):
         self.driver = None
 
     def run(self):
-        import pandas as pd
-        import openpyxl
-        from openpyxl.styles import Font, PatternFill, Alignment
-        from selenium import webdriver
-        from selenium.webdriver.common.by import By
-        from selenium.webdriver.support.ui import WebDriverWait
-        from selenium.webdriver.support import expected_conditions as EC
-        from selenium.common.exceptions import TimeoutException
-        from webdriver_manager.chrome import ChromeDriverManager
-        from selenium.webdriver.chrome.service import Service
-        import gspread
-        from oauth2client.service_account import ServiceAccountCredentials
+
         try:
             self.status.emit("크롬 드라이버 준비 중...")
             if not self.global_driver_path:
@@ -734,18 +695,7 @@ class SpellCheckWorker(QThread):
         self.text = text
 
     def run(self):
-        import pandas as pd
-        import openpyxl
-        from openpyxl.styles import Font, PatternFill, Alignment
-        from selenium import webdriver
-        from selenium.webdriver.common.by import By
-        from selenium.webdriver.support.ui import WebDriverWait
-        from selenium.webdriver.support import expected_conditions as EC
-        from selenium.common.exceptions import TimeoutException
-        from webdriver_manager.chrome import ChromeDriverManager
-        from selenium.webdriver.chrome.service import Service
-        import gspread
-        from oauth2client.service_account import ServiceAccountCredentials
+
         try:
             result = check_text(self.text)
             self.finished.emit(result)
@@ -1120,18 +1070,7 @@ class PlaceScraperWorker(QThread):
 
 
     def run(self):
-        import pandas as pd
-        import openpyxl
-        from openpyxl.styles import Font, PatternFill, Alignment
-        from selenium import webdriver
-        from selenium.webdriver.common.by import By
-        from selenium.webdriver.support.ui import WebDriverWait
-        from selenium.webdriver.support import expected_conditions as EC
-        from selenium.common.exceptions import TimeoutException
-        from webdriver_manager.chrome import ChromeDriverManager
-        from selenium.webdriver.chrome.service import Service
-        import gspread
-        from oauth2client.service_account import ServiceAccountCredentials
+
         has_error = False
         error_msg = ""
         is_early_return = False

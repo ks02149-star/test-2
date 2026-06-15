@@ -79,8 +79,8 @@ class MainWindow(FluentWindow):
                 except:
                     pass
                     
-            from PyQt5.QtCore import QProcess
-            QProcess.startDetached(sys.executable, sys.argv)
+            # 새로운 프로세스를 띄우는 대신, 내부 루프로 넘기기 위한 플래그 설정
+            QApplication.instance().wants_restart = True
             QApplication.quit()
 
     def update_theme_style(self):
