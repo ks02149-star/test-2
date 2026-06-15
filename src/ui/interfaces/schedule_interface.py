@@ -22,8 +22,9 @@ from src.core.schedule_threads import ScheduleAddThread, ScheduleDeleteThread, S
 from src.config import SESSION, WORKSPACE_DIR, ASSETS_DIR, DATA_DIR, FONT_DIR, SETTINGS_PATH, CREDENTIALS_PATH
 
 class ScheduleInterface(ScrollArea):
-    def __init__(self):
+    def __init__(self, main_window=None):
         super().__init__()
+        self.main_window = main_window
         self.setObjectName("ScheduleInterface")
         self.view = QWidget()
         self.view.setObjectName('ScheduleView')
@@ -227,6 +228,10 @@ class ScheduleInterface(ScrollArea):
                     self.schedule_data[d_str] = []
                 self.schedule_data[d_str].append((sch, color, creator_id))
         self.build_calendar()
+        
+        if self.main_window and hasattr(self.main_window, 'home_interface'):
+            # 홈 화면에도 새 스케줄 데이터를 전달하여 실시간 동기화
+            self.main_window.home_interface.on_schedule_fetched(data)
 
     def on_error_occurred(self, err):
         pass

@@ -110,13 +110,15 @@ class LoginDialog(QDialog):
         left_layout = QVBoxLayout(self.left_frame)
         left_layout.setContentsMargins(40, 60, 40, 60)
         
-        logo_label = QLabel("Antigravity", self.left_frame)
-        logo_label.setStyleSheet("color: white; font-size: 24px; font-weight: bold; background: transparent;")
+        logo_label = QLabel(self.left_frame)
+        pixmap = QPixmap(os.path.join(ASSETS_DIR, "images", "logo.png"))
+        logo_label.setPixmap(pixmap.scaledToHeight(40, Qt.SmoothTransformation))
+        logo_label.setStyleSheet("background: transparent;")
         
-        welcome_title = QLabel("Login into\nyour account", self.left_frame)
+        welcome_title = QLabel("푸름애드\n관리 프로그램", self.left_frame)
         welcome_title.setStyleSheet("color: white; font-size: 36px; font-weight: bold; background: transparent;")
         
-        welcome_sub = QLabel("Start managing your schedule seamlessly.", self.left_frame)
+        welcome_sub = QLabel("계속하시려면 로그인이 필요합니다.", self.left_frame)
         welcome_sub.setStyleSheet("color: #a0aec0; font-size: 14px; background: transparent;")
         
         left_layout.addWidget(logo_label)

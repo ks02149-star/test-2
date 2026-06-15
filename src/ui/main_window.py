@@ -36,7 +36,7 @@ class MainWindow(FluentWindow):
         self.init_window()
         
         self.home_interface = HomeInterface(self)
-        self.schedule_interface = ScheduleInterface()
+        self.schedule_interface = ScheduleInterface(self)
         self.scraper_interface = ScraperInterface(self)
         self.place_scraper_interface = PlaceScraperInterface(self)
         self.company_list_interface = CompanyListInterface(self)
