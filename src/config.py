@@ -1,7 +1,7 @@
 import os
 import sys
 
-VERSION = "1.1"
+VERSION = "1.2"
 
 # Base Path Logic
 if getattr(sys, 'frozen', False):
