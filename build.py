@@ -44,6 +44,7 @@ def main():
         "--collect-all", "selenium",
         "--collect-all", "webdriver_manager",
         "--collect-all", "pandas",
+        "--collect-all", "numpy",
         "--hidden-import", "PyQt5.QtWebEngineWidgets",
         "--hidden-import", "pandas",
         "--hidden-import", "pandas._libs.tslibs.strptime",

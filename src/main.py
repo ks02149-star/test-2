@@ -39,7 +39,13 @@ def main():
             if file_name.lower().endswith(('.otf', '.ttf')):
                 if any(suffix in file_name.lower() for suffix in allowed_suffixes):
                     font_path = os.path.join(FONT_DIR, file_name)
-                    font_id = QFontDatabase.addApplicationFont(font_path)
+                    try:
+                        with open(font_path, "rb") as f:
+                            font_data = f.read()
+                        font_id = QFontDatabase.addApplicationFontFromData(font_data)
+                    except Exception:
+                        font_id = -1
+                        
                     if font_id != -1:
                         families = QFontDatabase.applicationFontFamilies(font_id)
                         if families and loaded_family != "SUIT":
