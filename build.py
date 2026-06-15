@@ -16,7 +16,7 @@ def main():
         subprocess.call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
     
     # Install additional required packages
-    subprocess.call([sys.executable, "-m", "pip", "install", "PyQt5", "PyQtWebEngine", "PyQt-Fluent-Widgets", "selenium", "pandas", "openpyxl", "gspread", "oauth2client", "webdriver-manager"])
+    subprocess.call([sys.executable, "-m", "pip", "install", "PyQt5", "PyQtWebEngine", "PyQt-Fluent-Widgets", "selenium", "pandas", "openpyxl", "gspread", "oauth2client", "webdriver-manager", "requests", "beautifulsoup4"])
 
     print("\n2. 기존 빌드 찌꺼기 청소...")
     if os.path.exists("build"):
@@ -50,6 +50,8 @@ def main():
         "--hidden-import", "openpyxl",
         "--hidden-import", "gspread",
         "--hidden-import", "oauth2client",
+        "--hidden-import", "requests",
+        "--hidden-import", "bs4",
         "src/main.py"
     ]
     
