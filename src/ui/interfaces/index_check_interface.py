@@ -155,16 +155,17 @@ class IndexCheckInterface(QWidget):
         if not hasattr(self, 'chart_view'): return
         
         dates = stats_data.get('dates', [])
-        visitor = stats_data.get('visitor', [])
         views = stats_data.get('views', [])
+        avg_time = stats_data.get('avg_time', '0초')
         inflow = stats_data.get('inflow', [])
+        rank_posts = stats_data.get('rank_posts', [])
         
-        js_code = f"updateData({json.dumps(dates)}, {json.dumps(visitor)}, {json.dumps(views)}, {json.dumps(inflow)});"
+        js_code = f"updateData({json.dumps(dates)}, {json.dumps(views)}, {json.dumps(avg_time)}, {json.dumps(inflow)}, {json.dumps(rank_posts)});"
         self.chart_view.page().runJavaScript(js_code)
         
     def clear_chart(self):
         if not hasattr(self, 'chart_view'): return
-        js_code = "updateData([], [], [], []);"
+        js_code = "updateData([], [], '0초', [], []);"
         self.chart_view.page().runJavaScript(js_code)
         
     def update_stats(self):
@@ -192,7 +193,10 @@ class IndexCheckInterface(QWidget):
         self.loading_ring.start()
         self.status_label.setText("크롬 드라이버 준비 중...")
         
-        self.worker = StatsScraperWorker(blog_id, company_name, driver_path)
+        naver_id = company_data.get('naver_id', '').strip()
+        naver_pw = company_data.get('naver_pw', '').strip()
+        
+        self.worker = StatsScraperWorker(blog_id, company_name, driver_path, naver_id, naver_pw)
         self.worker.status.connect(self.on_worker_status)
         self.worker.finished.connect(self.on_worker_finished)
         self.worker.error.connect(self.on_worker_error)
@@ -209,17 +213,7 @@ class IndexCheckInterface(QWidget):
         self.status_label.setText("데이터 업데이트 성공!")
         self.time_label.setText(f"최근 업데이트: {stats_data.get('last_updated', '')}")
         self.render_stats(stats_data)
-        InfoBar.success("성공", f"'{self.company_combo.currentText()}' 블로그 통계 수집이 완료되었습니다.", duration=3000, parent=self)
-        
-    def on_worker_error(self, err_msg):
-        self.company_combo.setEnabled(True)
-        self.update_btn.setEnabled(True)
-        self.loading_ring.stop()
-        self.loading_ring.hide()
-        self.status_label.setText("실패")
-        MessageBox("오류 발생", f"통계 데이터 수집 중 오류가 발생했습니다:\n{err_msg}", self).exec_()
-        
-    def init_chart(self):
+        InfoBar.success("성공", f"'{self.company_combo.currentText()}' 블로그 통계    def init_chart(self):
         is_dark = isDarkTheme()
         theme_str = 'dark' if is_dark else 'light'
         bg_color = '#202020' if is_dark else '#F3F3F3'
@@ -235,201 +229,209 @@ class IndexCheckInterface(QWidget):
             <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
             <style>
                 html, body {{
-                    margin: 0;
-                    padding: 0;
-                    width: 100%;
-                    height: 100%;
-                    background-color: {bg_color};
-                    overflow: hidden;
-                    border-radius: 12px;
+                    margin: 0; padding: 0; width: 100%; height: 100%;
+                    background-color: {bg_color}; overflow-y: auto; overflow-x: hidden;
+                    border-radius: 12px; font-family: 'SUIT', sans-serif;
                 }}
-                .container {{
-                    display: flex;
-                    width: 100%;
-                    height: 100%;
-                    box-sizing: border-box;
-                    padding: 20px;
-                    gap: 24px;
+                /* Scrollbar styling */
+                ::-webkit-scrollbar {{ width: 8px; }}
+                ::-webkit-scrollbar-track {{ background: transparent; }}
+                ::-webkit-scrollbar-thumb {{ background: rgba(150, 150, 150, 0.4); border-radius: 4px; }}
+                ::-webkit-scrollbar-thumb:hover {{ background: rgba(150, 150, 150, 0.6); }}
+                
+                .dashboard {{
+                    display: flex; flex-direction: column; width: 100%; min-height: 100%;
+                    padding: 20px; box-sizing: border-box; gap: 20px;
                 }}
-                #main {{
-                    flex: 2;
-                    height: 100%;
-                    background-color: {card_bg};
-                    border-radius: 12px;
-                    border: 1px solid {border_color};
+                .summary-cards {{ display: flex; gap: 20px; height: 110px; flex-shrink: 0; }}
+                .card {{
+                    flex: 1; background-color: {card_bg}; border: 1px solid {border_color};
+                    border-radius: 12px; display: flex; flex-direction: column;
+                    justify-content: center; padding: 0 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);
                 }}
-                #inflow {{
-                    flex: 1;
-                    height: 100%;
-                    background-color: {card_bg};
-                    border-radius: 12px;
-                    border: 1px solid {border_color};
+                .card-title {{ color: {text_color}; opacity: 0.7; font-size: 14px; font-weight: bold; }}
+                .card-value {{ color: {text_color}; font-size: 34px; font-weight: 800; margin-top: 6px; }}
+                
+                .chart-container {{
+                    height: 380px; flex-shrink: 0; background-color: {card_bg};
+                    border: 1px solid {border_color}; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);
                 }}
+                
+                .tables-container {{ display: flex; gap: 20px; flex: 1; min-height: 300px; }}
+                .table-box {{
+                    flex: 1; background-color: {card_bg}; border: 1px solid {border_color};
+                    border-radius: 12px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+                    display: flex; flex-direction: column;
+                }}
+                .table-box h3 {{ margin-top: 0; margin-bottom: 16px; color: {text_color}; font-size: 16px; font-weight: bold; }}
+                
+                .table-wrapper {{ overflow-y: auto; flex: 1; }}
+                table {{ width: 100%; border-collapse: collapse; }}
+                th, td {{
+                    text-align: left; padding: 12px 8px; border-bottom: 1px solid {border_color};
+                    color: {text_color}; font-size: 13px;
+                }}
+                th {{ opacity: 0.6; font-weight: bold; position: sticky; top: 0; background-color: {card_bg}; z-index: 1; }}
+                tr:last-child td {{ border-bottom: none; }}
+                tr:hover td {{ background-color: rgba(150,150,150,0.1); }}
+                
+                /* Title ellipsis */
+                .ellipsis {{ white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 250px; display: inline-block; vertical-align: bottom; }}
             </style>
         </head>
         <body>
-            <div class="container">
-                <div id="main"></div>
-                <div id="inflow"></div>
+            <div class="dashboard">
+                <div class="summary-cards">
+                    <div class="card">
+                        <div class="card-title">게시글 평균사용시간 (최근 월 기준)</div>
+                        <div class="card-value" id="val-time">0초</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">최근 조회수 (마지막 월 기준)</div>
+                        <div class="card-value" id="val-views">0</div>
+                    </div>
+                </div>
+                <div class="chart-container" id="main"></div>
+                <div class="tables-container">
+                    <div class="table-box">
+                        <h3>검색 유입 분석 TOP 10</h3>
+                        <div class="table-wrapper">
+                            <table>
+                                <thead><tr><th>순위</th><th>유입 경로 / 키워드</th><th>비율(%)</th><th>조회수</th></tr></thead>
+                                <tbody id="tbody-inflow"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="table-box">
+                        <h3>게시물 조회수 순위 TOP 10</h3>
+                        <div class="table-wrapper">
+                            <table>
+                                <thead><tr><th>순위</th><th>게시물 제목</th><th>조회수</th></tr></thead>
+                                <tbody id="tbody-rank"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
             </div>
             <script type="text/javascript">
                 var currentTheme = '{theme_str}';
                 var textCol = '{text_color}';
                 var mainChart = echarts.init(document.getElementById('main'), currentTheme);
-                var inflowChart = echarts.init(document.getElementById('inflow'), currentTheme);
                 
                 var mainOption = {{
                     backgroundColor: 'transparent',
                     title: {{
-                        text: '방문자수 및 조회수 추이 (최근 30일)',
+                        text: '월간 조회수 추이 (최근 6개월)',
                         textStyle: {{ color: textCol, fontFamily: 'SUIT, sans-serif', fontSize: 16 }},
-                        left: '5%',
-                        top: 20
+                        left: 20, top: 20
                     }},
-                    tooltip: {{
-                        trigger: 'axis',
-                        axisPointer: {{ type: 'cross' }}
-                    }},
+                    tooltip: {{ trigger: 'axis', axisPointer: {{ type: 'cross' }} }},
                     legend: {{
-                        data: ['방문자수', '조회수'],
-                        top: 20,
-                        right: '5%',
+                        data: ['조회수'], top: 20, right: 20,
                         textStyle: {{ color: textCol, fontFamily: 'SUIT, sans-serif' }}
                     }},
-                    grid: {{
-                        left: '5%',
-                        right: '5%',
-                        bottom: '10%',
-                        top: '20%',
-                        containLabel: true
-                    }},
+                    grid: {{ left: '3%', right: '4%', bottom: '5%', top: '25%', containLabel: true }},
                     xAxis: [{{
-                        type: 'category',
-                        boundaryGap: false,
-                        data: [],
-                        axisLine: {{ lineStyle: {{ color: textCol, opacity: 0.5 }} }},
+                        type: 'category', boundaryGap: false, data: [],
+                        axisLine: {{ lineStyle: {{ color: textCol, opacity: 0.3 }} }},
                         axisLabel: {{ fontFamily: 'SUIT, sans-serif', color: textCol }}
                     }}],
                     yAxis: [{{
                         type: 'value',
-                        axisLine: {{ lineStyle: {{ color: textCol, opacity: 0.5 }} }},
+                        axisLine: {{ show: false }},
                         splitLine: {{ lineStyle: {{ color: textCol, opacity: 0.1 }} }},
                         axisLabel: {{ fontFamily: 'SUIT, sans-serif', color: textCol }}
                     }}],
                     series: [
                         {{
-                            name: '방문자수',
-                            type: 'line',
-                            smooth: true,
+                            name: '조회수', type: 'line', smooth: true,
                             lineStyle: {{ width: 4, color: '#0078D4' }},
                             itemStyle: {{ color: '#0078D4' }},
                             areaStyle: {{
                                 color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                                    {{ offset: 0, color: 'rgba(0, 120, 212, 0.3)' }},
+                                    {{ offset: 0, color: 'rgba(0, 120, 212, 0.4)' }},
                                     {{ offset: 1, color: 'rgba(0, 120, 212, 0.0)' }}
-                                    ])
-                            }},
-                            data: []
-                        }},
-                        {{
-                            name: '조회수',
-                            type: 'line',
-                            smooth: true,
-                            lineStyle: {{ width: 4, color: '#25A662' }},
-                            itemStyle: {{ color: '#25A662' }},
-                            areaStyle: {{
-                                color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                                    {{ offset: 0, color: 'rgba(37, 166, 98, 0.3)' }},
-                                    {{ offset: 1, color: 'rgba(37, 166, 98, 0.0)' }}
-                                    ])
+                                ])
                             }},
                             data: []
                         }}
                     ]
                 }};
                 
-                var inflowOption = {{
-                    backgroundColor: 'transparent',
-                    title: {{
-                        text: '유입 경로 분석 (Top 5)',
-                        textStyle: {{ color: textCol, fontFamily: 'SUIT, sans-serif', fontSize: 16 }},
-                        left: 'center',
-                        top: 20
-                    }},
-                    tooltip: {{
-                        trigger: 'item',
-                        formatter: '{{b}}: {{c}} ({{d}}%)'
-                    }},
-                    legend: {{
-                        bottom: 15,
-                        left: 'center',
-                        textStyle: {{ color: textCol, fontFamily: 'SUIT, sans-serif', fontSize: 11 }}
-                    }},
-                    series: [{{
-                        name: '유입 수',
-                        type: 'pie',
-                        radius: ['35%', '60%'],
-                        center: ['50%', '45%'],
-                        avoidLabelOverlap: false,
-                        itemStyle: {{
-                            borderRadius: 8,
-                            borderColor: '{card_bg}',
-                            borderWidth: 2
-                        }},
-                        label: {{ show: false }},
-                        data: []
-                    }}]
-                }};
-                
                 mainChart.setOption(mainOption);
-                inflowChart.setOption(inflowOption);
+                window.onresize = function() {{ mainChart.resize(); }};
                 
-                window.onresize = function() {{
-                    mainChart.resize();
-                    inflowChart.resize();
-                }};
-                
-                function updateData(dates, visitor, views, inflow) {{
+                function updateData(dates, views, avg_time, inflow, rank_posts) {{
                     mainOption.xAxis[0].data = dates;
-                    mainOption.series[0].data = visitor;
-                    mainOption.series[1].data = views;
+                    mainOption.series[0].data = views;
                     mainChart.setOption(mainOption);
                     
-                    inflowOption.series[0].data = inflow;
-                    inflowChart.setOption(inflowOption);
+                    document.getElementById('val-time').innerText = avg_time;
+                    let total_views = views.length > 0 ? views[views.length - 1] : 0;
+                    document.getElementById('val-views').innerText = total_views.toLocaleString();
+                    
+                    let inflowHtml = '';
+                    if (inflow.length === 0) {{
+                        inflowHtml = '<tr><td colspan="4" style="text-align:center; opacity:0.6; padding:30px;">데이터가 없습니다.</td></tr>';
+                    }} else {{
+                        for(let i=0; i<inflow.length; i++) {{
+                            inflowHtml += `<tr>
+                                <td>${{i+1}}</td>
+                                <td><span class="ellipsis" title="${{inflow[i].name}}">${{inflow[i].name}}</span></td>
+                                <td>${{inflow[i].percent.toFixed(1)}}%</td>
+                                <td>${{inflow[i].value.toLocaleString()}}</td>
+                            </tr>`;
+                        }}
+                    }}
+                    document.getElementById('tbody-inflow').innerHTML = inflowHtml;
+                    
+                    let rankHtml = '';
+                    if (rank_posts.length === 0) {{
+                        rankHtml = '<tr><td colspan="3" style="text-align:center; opacity:0.6; padding:30px;">데이터가 없습니다.</td></tr>';
+                    }} else {{
+                        for(let i=0; i<rank_posts.length; i++) {{
+                            rankHtml += `<tr>
+                                <td>${{i+1}}</td>
+                                <td><span class="ellipsis" title="${{rank_posts[i].title}}">${{rank_posts[i].title}}</span></td>
+                                <td>${{rank_posts[i].views.toLocaleString()}}</td>
+                            </tr>`;
+                        }}
+                    }}
+                    document.getElementById('tbody-rank').innerHTML = rankHtml;
                 }}
                 
                 function updateTheme(newTheme, newBgColor, newCardBg, newBorderColor, newTextColor) {{
-                    mainChart.dispose();
-                    inflowChart.dispose();
-                    
                     document.body.style.backgroundColor = newBgColor;
                     
-                    var divs = document.querySelectorAll('#main, #inflow');
-                    divs.forEach(function(d) {{
+                    var cards = document.querySelectorAll('.card, .chart-container, .table-box, th');
+                    cards.forEach(function(d) {{
                         d.style.backgroundColor = newCardBg;
                         d.style.borderColor = newBorderColor;
+                    }});
+                    
+                    var borders = document.querySelectorAll('th, td');
+                    borders.forEach(function(d) {{
+                        d.style.borderBottomColor = newBorderColor;
+                    }});
+                    
+                    var texts = document.querySelectorAll('.card-title, .card-value, .table-box h3, th, td');
+                    texts.forEach(function(d) {{
+                        d.style.color = newTextColor;
                     }});
                     
                     currentTheme = newTheme;
                     textCol = newTextColor;
                     
+                    mainChart.dispose();
                     mainChart = echarts.init(document.getElementById('main'), currentTheme);
-                    inflowChart = echarts.init(document.getElementById('inflow'), currentTheme);
                     
                     mainOption.title.textStyle.color = textCol;
                     mainOption.legend.textStyle.color = textCol;
                     mainOption.xAxis[0].axisLine.lineStyle.color = textCol;
                     mainOption.xAxis[0].axisLabel.color = textCol;
-                    mainOption.yAxis[0].axisLine.lineStyle.color = textCol;
                     mainOption.yAxis[0].splitLine.lineStyle.color = textCol;
                     mainOption.yAxis[0].axisLabel.color = textCol;
                     mainChart.setOption(mainOption);
-                    
-                    inflowOption.title.textStyle.color = textCol;
-                    inflowOption.legend.textStyle.color = textCol;
-                    inflowOption.series[0].itemStyle.borderColor = newCardBg;
-                    inflowChart.setOption(inflowOption);
                 }}
             </script>
         </body>

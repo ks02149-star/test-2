@@ -501,11 +501,13 @@ class StatsScraperWorker(QThread):
     error = pyqtSignal(str)      # Emits error message
     status = pyqtSignal(str)     # Emits status log message
 
-    def __init__(self, blog_id, company_name, global_driver_path):
+    def __init__(self, blog_id, company_name, global_driver_path, naver_id="", naver_pw=""):
         super().__init__()
         self.blog_id = blog_id
         self.company_name = company_name
         self.global_driver_path = global_driver_path
+        self.naver_id = naver_id
+        self.naver_pw = naver_pw
         self.driver = None
 
     def run(self):
@@ -540,19 +542,60 @@ class StatsScraperWorker(QThread):
             # Detect if we need to login
             login_wait_start = time.time()
             logged_in = False
+            auto_login_attempted = False
             
-            while time.time() - login_wait_start < 120:  # Wait up to 2 minutes
+            while time.time() - login_wait_start < 60:  # Wait up to 60 seconds
                 try:
                     curr_url = self.driver.current_url
                 except Exception:
-                    # Browser closed by user
                     self.error.emit("사용자가 브라우저를 종료했거나 통신이 끊겼습니다.")
                     return
                 
                 if "nid.naver.com" in curr_url:
+                    if self.naver_id and self.naver_pw and not auto_login_attempted:
+                        self.status.emit("등록된 계정으로 자동 로그인 우회 시도 중...")
+                        try:
+                            from PyQt5.QtWidgets import QApplication
+                            from selenium.webdriver.common.keys import Keys
+                            
+                            clipboard = QApplication.clipboard()
+                            
+                            id_input = WebDriverWait(self.driver, 5).until(EC.presence_of_element_located((By.ID, "id")))
+                            id_input.click()
+                            clipboard.setText(self.naver_id)
+                            id_input.send_keys(Keys.CONTROL, 'v')
+                            time.sleep(0.3)
+                            
+                            pw_input = self.driver.find_element(By.ID, "pw")
+                            pw_input.click()
+                            clipboard.setText(self.naver_pw)
+                            pw_input.send_keys(Keys.CONTROL, 'v')
+                            time.sleep(0.3)
+                            
+                            login_btn = self.driver.find_element(By.ID, "log.login")
+                            login_btn.click()
+                            time.sleep(2.0)
+                        except Exception as e:
+                            self.log(f"자동 로그인 주입 오류: {e}")
+                        
+                        auto_login_attempted = True
+                        time.sleep(2.0)
+                        continue
+                    
+                    if auto_login_attempted:
+                        # If still on nid.naver.com after attempting login, it likely failed or hit captcha
+                        try:
+                            captcha = self.driver.find_elements(By.ID, "captcha")
+                            err_msg = self.driver.find_elements(By.CLASS_NAME, "error_message")
+                            if captcha or (err_msg and err_msg[0].is_displayed()):
+                                self.error.emit("수동 로그인 필요 (캡차 또는 보호조치 감지)")
+                                self.cleanup()
+                                return
+                        except Exception:
+                            pass
+                            
                     self.status.emit("로그인 및 2차 인증 대기 중... (브라우저에서 로그인해 주세요)")
                 elif "blog.stat.naver.com" in curr_url:
-                    # Logged in, wait for page loaded
                     try:
                         WebDriverWait(self.driver, 5).until(
                             EC.presence_of_element_located((By.CSS_SELECTOR, "body"))
@@ -571,88 +614,124 @@ class StatsScraperWorker(QThread):
                 
             self.status.emit("로그인 완료 감지! 블로그 통계 데이터를 수집 중...")
             
-            # Fetch visitor, views, inflow data using JS fetch on the same origin
-            end_date = QDate.currentDate().toString("yyyy-MM-dd")
-            start_date = QDate.currentDate().addDays(-30).toString("yyyy-MM-dd")
+            end_month = QDate.currentDate().toString("yyyy-MM")
+            start_month = QDate.currentDate().addMonths(-6).toString("yyyy-MM")
             
-            # 1. Daily Visitors
-            js_visitor = f"""
+            # 1. Monthly Views
+            js_views = f"""
             var callback = arguments[arguments.length - 1];
-            fetch('/api/visitor/daily?blogId={self.blog_id}&startDate={start_date}&endDate={end_date}')
+            fetch('/api/views/monthly?blogId={self.blog_id}&startDate={start_month}&endDate={end_month}')
                 .then(res => res.json())
                 .then(data => callback(data))
                 .catch(err => callback(null));
             """
             self.driver.set_script_timeout(10)
-            res_visitor = self.driver.execute_async_script(js_visitor)
+            res_views = self.driver.execute_async_script(js_views)
             
-            # 2. Daily Views
-            js_views = f"""
+            # 2. Average Time (Monthly)
+            js_time = f"""
             var callback = arguments[arguments.length - 1];
-            fetch('/api/views/daily?blogId={self.blog_id}&startDate={start_date}&endDate={end_date}')
+            fetch('/api/blog/average/time?timeDimension=MONTH&startDate={start_month}&endDate={end_month}&blogId={self.blog_id}')
                 .then(res => res.json())
                 .then(data => callback(data))
                 .catch(err => callback(null));
             """
-            res_views = self.driver.execute_async_script(js_views)
+            res_time = self.driver.execute_async_script(js_time)
             
-            # 3. Referrer / Inflow
+            # 3. Search Inflow
             js_inflow = f"""
             var callback = arguments[arguments.length - 1];
-            fetch('/api/inflow/daily?blogId={self.blog_id}&startDate={start_date}&endDate={end_date}')
+            fetch('/api/inflow/monthly/search?blogId={self.blog_id}&startDate={end_month}&endDate={end_month}')
                 .then(res => res.json())
                 .then(data => callback(data))
                 .catch(err => callback(null));
             """
             res_inflow = self.driver.execute_async_script(js_inflow)
             
-            # Parsing daily stats
-            dates = []
-            visitor_cnts = []
-            views_cnts = []
-            inflow_paths = []
+            # 4. View Rank
+            js_rank = f"""
+            var callback = arguments[arguments.length - 1];
+            fetch('/api/blog/rank/cvContentPc?timeDimension=MONTH&startDate={end_month}&blogId={self.blog_id}')
+                .then(res => res.json())
+                .then(data => callback(data))
+                .catch(err => callback(null));
+            """
+            res_rank = self.driver.execute_async_script(js_rank)
             
-            # Process visitor
+            # Parsing monthly stats
+            dates = []
+            views_cnts = []
+            avg_time = "0초"
+            inflow_paths = []
+            rank_posts = []
+            
+            # Process views
             try:
-                raw_list = res_visitor.get('result', {}).get('dailyVisitor', [])
+                raw_list = res_views.get('result', {}).get('monthlyViews', [])
+                # Sometimes the key is different depending on exact API response, fallback to parsing generic object
+                if not raw_list:
+                    for k, v in res_views.get('result', {}).items():
+                        if isinstance(v, list) and len(v) > 0 and 'views' in v[0]:
+                            raw_list = v
+                            break
+                            
                 for item in raw_list:
                     dt = str(item.get('date', ''))
-                    if len(dt) == 8:
-                        formatted_dt = f"{dt[4:6]}/{dt[6:8]}"
+                    if len(dt) == 6:
+                        formatted_dt = f"{dt[0:4]}-{dt[4:6]}"
                     else:
                         formatted_dt = dt
                     dates.append(formatted_dt)
-                    visitor_cnts.append(item.get('visitor', 0))
-            except Exception:
-                pass
-                
-            # Process views
-            try:
-                raw_list = res_views.get('result', {}).get('dailyViews', [])
-                for item in raw_list:
                     views_cnts.append(item.get('views', 0))
             except Exception:
                 pass
                 
-            # Adjust arrays size to match
-            min_len = min(len(dates), len(visitor_cnts), len(views_cnts))
-            if min_len > 0:
-                dates = dates[:min_len]
-                visitor_cnts = visitor_cnts[:min_len]
-                views_cnts = views_cnts[:min_len]
-            
-            # Process inflow paths
+            # Process avg time (latest month)
             try:
-                raw_list = res_inflow.get('result', {}).get('inflow', [])
-                for item in raw_list[:5]:  # Top 5
+                raw_list = res_time.get('result', {}).get('blogAverageTimeList', [])
+                if raw_list:
+                    latest = raw_list[-1]
+                    avg_time = f"{latest.get('averageTime', 0)}초"
+            except Exception:
+                pass
+            
+            # Process search inflow paths
+            try:
+                # Determine where the data is
+                raw_list = []
+                for k, v in res_inflow.get('result', {}).items():
+                    if isinstance(v, list) and len(v) > 0 and 'count' in v[0]:
+                        raw_list = v
+                        break
+                        
+                for item in raw_list[:10]:  # Top 10
                     inflow_paths.append({
-                        'name': item.get('source', '알 수 없음'),
-                        'value': item.get('count', 0)
+                        'name': item.get('keyword', item.get('source', '알 수 없음')),
+                        'value': item.get('count', 0),
+                        'percent': item.get('percent', 0.0)
+                    })
+            except Exception:
+                pass
+                
+            # Process View Rank posts
+            try:
+                raw_list = res_rank.get('result', {}).get('cvContentPc', [])
+                if not raw_list:
+                    for k, v in res_rank.get('result', {}).items():
+                        if isinstance(v, list) and len(v) > 0 and 'contentTitle' in v[0]:
+                            raw_list = v
+                            break
+                            
+                for item in raw_list[:10]:
+                    rank_posts.append({
+                        'title': item.get('contentTitle', '제목 없음'),
+                        'views': item.get('count', 0)
                     })
             except Exception:
                 pass
                 
             if not dates:
+                # If everything failed, try to mock or emit error
                 self.error.emit("데이터를 파싱하지 못했거나 권한이 없습니다.")
                 self.cleanup()
                 return
@@ -660,9 +739,10 @@ class StatsScraperWorker(QThread):
             stats_data = {
                 'last_updated': time.strftime("%Y-%m-%d %H:%M:%S"),
                 'dates': dates,
-                'visitor': visitor_cnts,
                 'views': views_cnts,
-                'inflow': inflow_paths
+                'avg_time': avg_time,
+                'inflow': inflow_paths,
+                'rank_posts': rank_posts
             }
             
             # Save to JSON file
