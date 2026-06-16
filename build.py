@@ -30,11 +30,11 @@ def main():
             except:
                 pass
 
-    print("\n3. 단일 실행파일(.exe) 생성 시작! (잠시만 기다려주세요...)")
+    print("\n3. 프로그램 빌드 시작! (잠시만 기다려주세요...)")
     pyinstaller_args = [
         "pyinstaller",
         "--noconfirm",
-        "--onefile",
+        "--onedir",
         "--windowed",
         "--name", "푸름애드_관리프로그램",
         "--paths", ".",
@@ -43,8 +43,17 @@ def main():
         "--collect-all", "qfluentwidgets",
         "--collect-all", "selenium",
         "--collect-all", "webdriver_manager",
-        "--collect-all", "pandas",
-        "--collect-all", "numpy",
+        "--exclude-module", "matplotlib",
+        "--exclude-module", "IPython",
+        "--exclude-module", "scipy",
+        "--exclude-module", "pytest",
+        "--exclude-module", "tkinter",
+        "--exclude-module", "pyarrow",
+        "--exclude-module", "fastparquet",
+        "--exclude-module", "tables",
+        "--exclude-module", "sqlalchemy",
+        "--exclude-module", "PyQt6",
+        "--exclude-module", "PySide6",
         "--hidden-import", "PyQt5.QtWebEngineWidgets",
         "--hidden-import", "pandas",
         "--hidden-import", "pandas._libs.tslibs.strptime",
@@ -61,22 +70,26 @@ def main():
     subprocess.check_call(pyinstaller_args)
 
     print("\n4. 프로그램과 함께 배포해야 할 기본 파일 복사 중...")
-    if not os.path.exists("dist"):
-        os.makedirs("dist")
+    target_dir = os.path.join("dist", "푸름애드_관리프로그램")
+    workspace_dir = os.path.join(target_dir, "Workspace")
+    
+    if not os.path.exists(target_dir):
+        os.makedirs(target_dir, exist_ok=True)
+    if not os.path.exists(workspace_dir):
+        os.makedirs(workspace_dir, exist_ok=True)
     
     if os.path.exists("credentials.json"):
-        shutil.copy2("credentials.json", "dist/credentials.json")
+        shutil.copy2("credentials.json", os.path.join(workspace_dir, "credentials.json"))
     if os.path.exists("키워드_순위_작업표.xlsx"):
-        shutil.copy2("키워드_순위_작업표.xlsx", "dist/키워드_순위_작업표.xlsx")
+        shutil.copy2("키워드_순위_작업표.xlsx", os.path.join(target_dir, "키워드_순위_작업표.xlsx"))
 
     print("\n========================================================")
     print("빌드가 성공적으로 완료되었습니다!")
     print("[배포 방법]")
-    print("1. 현재 폴더에 생긴 'dist' 폴더 안으로 들어가세요.")
-    print("2. 그 안에 있는 파일들을 압축(Zip)하여 다른 컴퓨터에 전달하시면 됩니다.")
-    print("   - 푸름애드_관리프로그램.exe (본체)")
-    print("   - credentials.json (구글 시트 연동 파일, 있는 경우에만)")
-    print("   - 키워드_순위_작업표.xlsx (있는 경우에만)")
+    print("1. 'dist' 폴더 안에 생성된 '푸름애드_관리프로그램' 폴더를 확인하세요.")
+    print("2. 해당 폴더 전체를 통째로 압축(.zip)하여 사용자에게 전달하세요.")
+    print("   ※ 폴더 안에는 .exe 파일뿐만 아니라 _internal, Workspace 등이 포함되어야 합니다.")
+    print("   ※ credentials.json 파일은 Workspace 폴더 안에 정상적으로 배포되었습니다.")
     print()
     print("* 다른 사람 컴퓨터에 파이썬이 설치되어 있지 않아도 완벽하게 작동합니다!")
     print("========================================================")

@@ -19,6 +19,7 @@ from src.core.scraper_threads import DriverInitWorker, PlaceScraperWorker
 from src.ui.components.cards import PlaceExposureCard, FavoritePlaceCard
 from src.ui.components.dialogs import FavoriteEditDialog
 from src.config import SESSION, WORKSPACE_DIR, ASSETS_DIR, DATA_DIR, FONT_DIR, SETTINGS_PATH, CREDENTIALS_PATH
+from src.utils.helpers import safe_json_load, safe_json_save
 
 class PlaceScraperInterface(QWidget):
     def __init__(self, parent=None):
@@ -36,13 +37,8 @@ class PlaceScraperInterface(QWidget):
         
     def load_favorites(self):
         self.favorites_path = os.path.join(DATA_DIR, "place_favorites.json")
-        if os.path.exists(self.favorites_path):
-            try:
-                with open(self.favorites_path, 'r', encoding='utf-8') as f:
-                    self.favorites_data = json.load(f)
-            except Exception:
-                self.favorites_data = [{} for _ in range(12)]
-        else:
+        self.favorites_data = safe_json_load(self.favorites_path, default=None)
+        if not self.favorites_data:
             self.favorites_data = [{} for _ in range(12)]
             
         while len(self.favorites_data) < 12:
@@ -50,11 +46,8 @@ class PlaceScraperInterface(QWidget):
             
     def save_favorites(self):
         os.makedirs(DATA_DIR, exist_ok=True)
-        try:
-            with open(self.favorites_path, 'w', encoding='utf-8') as f:
-                json.dump(self.favorites_data, f, ensure_ascii=False, indent=4)
-        except Exception as e:
-            print(f"Failed to save favorites: {e}")
+        if not safe_json_save(self.favorites_path, self.favorites_data):
+            print("Failed to save favorites")
 
     def init_ui(self):
         main_layout = QVBoxLayout(self)

@@ -24,6 +24,7 @@ from qfluentwidgets import (PushButton, PrimaryPushButton, ComboBox, SpinBox, Sw
                             BodyLabel, IconWidget, HyperlinkButton, PasswordLineEdit, CheckBox, NavigationPushButton, RoundMenu, Action)
 from qfluentwidgets.common.icon import drawIcon
 from src.config import SESSION, WORKSPACE_DIR, ASSETS_DIR, DATA_DIR, FONT_DIR, SETTINGS_PATH, CREDENTIALS_PATH
+from src.utils.helpers import safe_json_load, safe_json_save
 
 class MainWindow(FluentWindow):
     def __init__(self):
@@ -64,24 +65,27 @@ class MainWindow(FluentWindow):
             SESSION["id"] = None
             SESSION["name"] = None
             
-            import os, sys, json
-            base_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
-            settings_path = os.path.join(base_dir, "Workspace", "settings.json")
-            if os.path.exists(settings_path):
-                try:
-                    with open(settings_path, 'r', encoding='utf-8') as f:
-                        data = json.load(f)
-                    data["auto_login"] = False
-                    data.pop("saved_id", None)
-                    data.pop("saved_pw", None)
-                    with open(settings_path, 'w', encoding='utf-8') as f:
-                        json.dump(data, f, ensure_ascii=False, indent=4)
-                except:
-                    pass
+            data = safe_json_load(SETTINGS_PATH, default={})
+            data["auto_login"] = False
+            data.pop("saved_id", None)
+            data.pop("saved_pw", None)
+            safe_json_save(SETTINGS_PATH, data)
                     
             # 새로운 프로세스를 띄우는 대신, 내부 루프로 넘기기 위한 플래그 설정
             QApplication.instance().wants_restart = True
             QApplication.quit()
+
+    def load_theme(self):
+        config_path = os.path.join(WORKSPACE_DIR, "settings.json")
+        data = safe_json_load(config_path, default={})
+        if data:
+            theme_val = data.get('theme', 'Auto')
+            if theme_val == 'Light':
+                setTheme(Theme.LIGHT)
+            elif theme_val == 'Dark':
+                setTheme(Theme.DARK)
+            else:
+                setTheme(Theme.AUTO)
 
     def update_theme_style(self):
         is_dark = isDarkTheme()

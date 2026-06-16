@@ -26,6 +26,7 @@ from bs4 import BeautifulSoup
 from bs4 import BeautifulSoup
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject
 from src.config import SESSION, WORKSPACE_DIR, ASSETS_DIR, DATA_DIR, SETTINGS_PATH, CREDENTIALS_PATH
+from src.utils.helpers import safe_json_save
 
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
@@ -667,8 +668,7 @@ class StatsScraperWorker(QThread):
             # Save to JSON file
             data_dir = os.path.join(base_dir, "Data")
             stats_path = os.path.join(data_dir, f"stats_{self.company_name}.json")
-            with open(stats_path, 'w', encoding='utf-8') as f:
-                json.dump(stats_data, f, ensure_ascii=False, indent=4)
+            safe_json_save(stats_path, stats_data)
                 
             self.finished.emit(stats_data)
             

@@ -23,9 +23,7 @@ install_required_packages()
 # Load paths and global config
 from src.config import FONT_DIR
 
-def check_for_updates():
-    # Keep the existing logic but gracefully fail since it's just a placeholder usually
-    pass
+
 
 def cleanup_before_exit():
     import subprocess
@@ -50,6 +48,10 @@ def main():
     app = QApplication(sys.argv)
     app.aboutToQuit.connect(cleanup_before_exit)
     
+    # 지연 로딩된 패치 적용
+    from src.utils.helpers import patch_calendar
+    patch_calendar()
+    
     loaded_family = "SUIT"
     if os.path.exists(FONT_DIR):
         allowed_suffixes = ("regular.otf", "medium.otf", "semibold.otf", "bold.otf",
@@ -73,11 +75,9 @@ def main():
     app_font = QFont(loaded_family, 10, QFont.Normal)
     app.setFont(app_font)
 
-    check_for_updates()
 
     # Import UI here to benefit from delayed loading
     from src.ui.login_dialog import LoginDialog
-    from src.ui.main_window import MainWindow
 
     # 프로세스 재시작 없이 내부 루프로 로그아웃/로그인 전환
     while True:
@@ -90,8 +90,15 @@ def main():
         
         login_dialog = LoginDialog()
         if login_dialog.exec_() == QDialog.Accepted:
+            from src.ui.main_window import MainWindow
             window = MainWindow()
             window.show()
+            
+            # 메인 화면이 그려진 후 업데이트 체크 (UI 멈춤 방지)
+            from src.utils.helpers import check_for_updates
+            from PyQt5.QtCore import QTimer
+            QTimer.singleShot(500, lambda: check_for_updates(manual_check=False))
+            
             app.exec_()
             
             if getattr(app, 'wants_restart', False):

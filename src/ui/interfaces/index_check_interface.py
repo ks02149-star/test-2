@@ -25,6 +25,7 @@ from qfluentwidgets import (PushButton, PrimaryPushButton, ComboBox, SpinBox, Sw
 from qfluentwidgets.common.icon import drawIcon
 from src.core.scraper_threads import StatsScraperWorker
 from src.config import SESSION, WORKSPACE_DIR, ASSETS_DIR, DATA_DIR, FONT_DIR, SETTINGS_PATH, CREDENTIALS_PATH
+from src.utils.helpers import safe_json_load
 
 class IndexCheckInterface(QWidget):
     def __init__(self, parent=None):
@@ -142,17 +143,12 @@ class IndexCheckInterface(QWidget):
         
         # Load local stats JSON file
         stats_path = os.path.join(self.base_dir, "Data", f"stats_{company_name}.json")
-        if os.path.exists(stats_path):
-            try:
-                with open(stats_path, 'r', encoding='utf-8') as f:
-                    stats_data = json.load(f)
-                self.time_label.setText(f"최근 업데이트: {stats_data.get('last_updated', '알 수 없음')}")
-                self.render_stats(stats_data)
-            except Exception:
-                self.time_label.setText("데이터 로드 오류")
-                self.clear_chart()
+        stats_data = safe_json_load(stats_path, default=None)
+        if stats_data:
+            self.time_label.setText(f"최근 업데이트: {stats_data.get('last_updated', '알 수 없음')}")
+            self.render_stats(stats_data)
         else:
-            self.time_label.setText("통계 데이터가 없습니다. 업데이트를 진행해 주세요.")
+            self.time_label.setText("통계 데이터가 없거나 업데이트를 진행해 주세요.")
             self.clear_chart()
             
     def render_stats(self, stats_data):

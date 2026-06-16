@@ -1,14 +1,19 @@
-import requests
-from packaging.version import parse as parse_version
-from src.config import VERSION
+import os
+import sys
+import tempfile
+import subprocess
+import traceback
+import json
+from src.config import WORKSPACE_DIR, DATA_DIR, VERSION
+
 def perform_update(release_info=None):
     if not release_info:
         return
         
-    import os, sys, tempfile, subprocess
     import requests
     from PyQt5.QtWidgets import QMessageBox, QProgressDialog, QApplication
     from PyQt5.QtCore import Qt
+    import zipfile
 
     if not getattr(sys, 'frozen', False):
         import webbrowser
@@ -16,19 +21,18 @@ def perform_update(release_info=None):
         webbrowser.open(release_info.get("html_url", "https://github.com/ks02149-star/test-2/releases/latest"))
         return
 
-    # 1. 릴리즈에서 .exe 파일 URL 찾기
+    # 1. 릴리즈에서 .zip 파일 URL 찾기
     download_url = None
     assets = release_info.get("assets", [])
     for asset in assets:
-        if asset.get("name", "").endswith(".exe"):
+        if asset.get("name", "").endswith(".zip"):
             download_url = asset.get("browser_download_url")
             break
             
     if not download_url:
-        QMessageBox.critical(None, "오류", "최신 릴리즈에서 설치 파일(.exe)을 찾을 수 없습니다.")
+        QMessageBox.critical(None, "오류", "최신 릴리즈에서 설치 파일(.zip)을 찾을 수 없습니다.")
         return
 
-    # 2. 다운로드 및 진행률 표시
     try:
         progress = QProgressDialog("최신 버전을 다운로드 중입니다...", "취소", 0, 100, None)
         progress.setWindowTitle("업데이트")
@@ -41,11 +45,12 @@ def perform_update(release_info=None):
         total_size = int(response.headers.get('content-length', 0))
         
         temp_dir = tempfile.gettempdir()
-        new_exe_path = os.path.join(temp_dir, "update_new.exe")
+        zip_path = os.path.join(temp_dir, "update_new.zip")
+        extract_dir = os.path.join(temp_dir, "update_extracted")
         
         downloaded_size = 0
-        with open(new_exe_path, "wb") as f:
-            for chunk in response.iter_content(chunk_size=1048576): # 1MB 단위로 큼직하게 받아 다운로드 속도 대폭 향상 (서버 끊김 방지)
+        with open(zip_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size=1048576):
                 if progress.wasCanceled():
                     return
                 if chunk:
@@ -56,66 +61,101 @@ def perform_update(release_info=None):
                         progress.setValue(percent)
                     QApplication.processEvents()
                     
-        # 깃허브 서버 문제나 인터넷 불안정으로 파일이 중간에 끊긴 채 다운로드 완료 처리되는 것을 원천 차단
         if total_size > 0 and downloaded_size < total_size:
-            raise Exception(f"다운로드가 중간에 끊겼습니다. (받은 용량: {downloaded_size} / 전체: {total_size})\\n다시 시도해주세요.")
+            raise Exception(f"다운로드가 중간에 끊겼습니다. (받은 용량: {downloaded_size} / 전체: {total_size})\n다시 시도해주세요.")
             
+        progress.setLabelText("업데이트 파일을 압축 해제 중입니다...")
+        QApplication.processEvents()
+        
+        # 2. ZIP 압축 해제 (한글 파일명 깨짐 방어)
+        import shutil
+        if os.path.exists(extract_dir):
+            shutil.rmtree(extract_dir, ignore_errors=True)
+        os.makedirs(extract_dir, exist_ok=True)
+        
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            for zip_info in zip_ref.infolist():
+                # 한글 파일명 복원 (CP437 -> CP949 or UTF-8)
+                original_filename = zip_info.filename
+                try:
+                    zip_info.filename = original_filename.encode('cp437').decode('cp949')
+                except:
+                    try:
+                        zip_info.filename = original_filename.encode('cp437').decode('utf-8')
+                    except:
+                        pass
+                zip_ref.extract(zip_info, extract_dir)
+                
         progress.setValue(100)
 
-        # 3. 덮어쓰기용 배치 스크립트 생성 및 실행
+        # ZIP 최상위가 '푸름애드_관리프로그램' 폴더인지 확인 (폴더 안에 폴더가 있는 경우 벗겨냄)
+        update_source_dir = extract_dir
+        extracted_items = os.listdir(extract_dir)
+        if len(extracted_items) == 1 and os.path.isdir(os.path.join(extract_dir, extracted_items[0])):
+            update_source_dir = os.path.join(extract_dir, extracted_items[0])
+
+        # 3. 디렉토리 Atomic Swap 용 배치 스크립트 생성 및 실행
         current_exe = sys.executable
-        pid = os.getpid()
-        meipass = getattr(sys, '_MEIPASS', '')
+        current_dir = os.path.dirname(current_exe)
+        internal_dir = os.path.join(current_dir, "_internal")
+        internal_old_dir = os.path.join(current_dir, "_internal_old")
+        
         bat_path = os.path.join(temp_dir, "update_script.bat")
         
-        with open(bat_path, "w", encoding="mbcs") as f:
+        with open(bat_path, "w", encoding="utf-8") as f:
             f.write('@echo off\n')
-            f.write('setlocal enabledelayedexpansion\n')
-            f.write('timeout /t 1 /nobreak > nul\n')
+            f.write('chcp 65001 > nul\n')
+            f.write('timeout /t 2 /nobreak > nul\n')
+            
+            # 크롬드라이버 등 잔여 프로세스 강제 종료
+            f.write('taskkill /F /IM chromedriver.exe /T > nul 2>&1\n')
+            f.write('taskkill /F /IM chromedriver_patched.exe /T > nul 2>&1\n')
+            
             f.write('set max_retries=15\n')
             f.write('set count=0\n')
             f.write(':retry\n')
-            f.write(f'copy /y "{new_exe_path}" "{current_exe}" > nul 2>&1\n')
-            f.write('if %errorlevel% neq 0 (\n')
+            
+            # 이전 찌꺼기 삭제 시도
+            f.write(f'if exist "{internal_old_dir}" rmdir /s /q "{internal_old_dir}" > nul 2>&1\n')
+            
+            # 핵심 폴더 이름 변경을 통한 파일 잠금 테스트
+            f.write(f'if exist "{internal_dir}" ren "{internal_dir}" "_internal_old" > nul 2>&1\n')
+            
+            # 여전히 _internal이 남아있다면 이름 변경 실패(잠금 상태)이므로 재시도
+            f.write(f'if exist "{internal_dir}" (\n')
             f.write('    set /a count+=1\n')
             f.write('    if !count! geq %max_retries% goto fail\n')
-            f.write('    timeout /t 1 /nobreak > nul\n')
+            f.write('    timeout /t 2 /nobreak > nul\n')
             f.write('    goto retry\n')
             f.write(')\n')
             
-            # 기존 프로세스가 찌꺼기(반쯤 지워진 임시 폴더)를 남기고 죽는 PyInstaller 버그 원천 차단
-            # 구버전이 쓰던 MEI 임시 폴더 경로를 추적하여 스크립트가 직접 강제로 박살냄
-            f.write('timeout /t 2 /nobreak > nul\n')
-            if meipass:
-                f.write(f'rmdir /s /q "{meipass}" > nul 2>&1\n')
-                
+            # 덮어쓰기 (새 파일들을 제자리에 복사)
+            f.write(f'xcopy /s /e /y "{update_source_dir}\\*" "{current_dir}\\" > nul\n')
+            
+            # 프로그램 재시작
             f.write(f'start "" "{current_exe}"\n')
             f.write('goto cleanup\n')
+            
             f.write(':fail\n')
+            f.write('echo 업데이트 파일을 덮어쓰는데 실패했습니다. 열려있는 파일이 없는지 확인해주세요.\n')
             f.write(f'start "" "{current_exe}"\n')
+            
             f.write(':cleanup\n')
-            f.write(f'del "{new_exe_path}"\n')
+            f.write(f'if exist "{internal_old_dir}" rmdir /s /q "{internal_old_dir}" > nul 2>&1\n')
+            f.write(f'rmdir /s /q "{extract_dir}" > nul 2>&1\n')
+            f.write(f'del "{zip_path}" > nul 2>&1\n')
             f.write('del "%~f0"\n')
             
-        # 경로 띄어쓰기 인식 오류를 원천 차단하기 위해 리스트 형태로 전달
+        # 띄어쓰기/한글 경로 대응을 위해 리스트 형태로 호출
         subprocess.Popen([bat_path], creationflags=subprocess.CREATE_NO_WINDOW)
         
-        # 일반 종료(sys.exit) 시 임시 폴더를 삭제하느라 시간이 끌리고, 
-        # 삭제 도중 새 프로그램이 켜지면 DLL 파일이 깨지는 현상이 발생하므로 즉시 강제 종료(os._exit) 사용
         os._exit(0)
         
     except Exception as e:
-        QMessageBox.critical(None, "다운로드 오류", f"업데이트 파일을 받는 중 오류가 발생했습니다:\n{str(e)}")
-import sys
-import os
-import traceback
-import subprocess
-from src.config import WORKSPACE_DIR
+        QMessageBox.critical(None, "다운로드 오류", f"업데이트 파일을 처리하는 중 오류가 발생했습니다:\n{str(e)}")
 
 def custom_excepthook(exc_type, exc_value, exc_tb):
     error_msg = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
-    
-    # 1. 오류 내용을 Workspace 디렉토리 내에 강제 저장
     try:
         base_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
         workspace_dir = os.path.join(base_dir, "Workspace")
@@ -127,7 +167,6 @@ def custom_excepthook(exc_type, exc_value, exc_tb):
     except:
         pass
         
-    # 2. 콘솔의 input() 대신 GUI 팝업창(QMessageBox)으로 오류 출력
     try:
         from PyQt5.QtWidgets import QApplication, QMessageBox
         if QApplication.instance():
@@ -145,7 +184,6 @@ sys.excepthook = custom_excepthook
 def install_required_packages():
     if getattr(sys, 'frozen', False):
         return
-        
     packages = {
         "pandas": "pandas", 
         "selenium": "selenium", 
@@ -168,52 +206,61 @@ def install_required_packages():
 
 install_required_packages()
 
-import qfluentwidgets.components.date_time.calendar_view as cv
-orig_init = cv.DayScrollView.__init__
+def patch_calendar():
+    import qfluentwidgets.components.date_time.calendar_view as cv
+    if hasattr(cv.DayScrollView, '_patched'):
+        return
+    orig_init = cv.DayScrollView.__init__
 
-def new_init(self, parent=None):
-    orig_init(self, parent)
-    self.weekDays = [self.tr('Su'), self.tr('Mo'), self.tr('Tu'), self.tr('We'),
-                     self.tr('Th'), self.tr('Fr'), self.tr('Sa')]
-    while self.weekDayLayout.count():
-        item = self.weekDayLayout.takeAt(0)
-        if item.widget():
-            item.widget().deleteLater()
-    for day in self.weekDays:
-        label = cv.QLabel(day)
-        label.setObjectName('weekDayLabel')
-        self.weekDayLayout.addWidget(label, 1, cv.Qt.AlignHCenter)
+    def new_init(self, parent=None):
+        orig_init(self, parent)
+        self.weekDays = [self.tr('Su'), self.tr('Mo'), self.tr('Tu'), self.tr('We'),
+                         self.tr('Th'), self.tr('Fr'), self.tr('Sa')]
+        while self.weekDayLayout.count():
+            item = self.weekDayLayout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        for day in self.weekDays:
+            label = cv.QLabel(day)
+            label.setObjectName('weekDayLabel')
+            self.weekDayLayout.addWidget(label, 1, cv.Qt.AlignHCenter)
 
-def new_initItems(self):
-    self.clear()
-    startDate = cv.QDate(self.minYear, 1, 1)
-    endDate = cv.QDate(self.maxYear, 12, 31)
-    currentDate = startDate
+    def new_initItems(self):
+        self.clear()
+        startDate = cv.QDate(self.minYear, 1, 1)
+        endDate = cv.QDate(self.maxYear, 12, 31)
+        currentDate = startDate
 
-    bias = currentDate.dayOfWeek() % 7
-    for i in range(bias):
-        item = cv.QListWidgetItem(self)
-        item.setFlags(cv.Qt.NoItemFlags)
-        self.addItem(item)
+        bias = currentDate.dayOfWeek() % 7
+        for i in range(bias):
+            item = cv.QListWidgetItem(self)
+            item.setFlags(cv.Qt.NoItemFlags)
+            self.addItem(item)
 
-    items, dates = [], []
-    while currentDate <= endDate:
-        items.append(str(currentDate.day()))
-        dates.append(cv.QDate(currentDate))
-        currentDate = currentDate.addDays(1)
-        
-    self.addItems(items)
-    for i, date in enumerate(dates):
-        self.item(i + bias).setData(cv.Qt.UserRole, date)
+        items, dates = [], []
+        while currentDate <= endDate:
+            items.append(str(currentDate.day()))
+            dates.append(cv.QDate(currentDate))
+            currentDate = currentDate.addDays(1)
+            
+        self.addItems(items)
+        for i, date in enumerate(dates):
+            self.item(i + bias).setData(cv.Qt.UserRole, date)
 
-def new_dateToRow(self, date: cv.QDate):
-    startDate = cv.QDate(self.minYear, 1, 1)
-    days = startDate.daysTo(date)
-    return days + (startDate.dayOfWeek() % 7)
+    def new_dateToRow(self, date: cv.QDate):
+        startDate = cv.QDate(self.minYear, 1, 1)
+        days = startDate.daysTo(date)
+        return days + (startDate.dayOfWeek() % 7)
 
-cv.DayScrollView.__init__ = new_init
+    cv.DayScrollView.__init__ = new_init
+    cv.DayScrollView.initItems = new_initItems
+    cv.DayScrollView.dateToRow = new_dateToRow
+    cv.DayScrollView._patched = True
+
 
 def check_for_updates(manual_check=False):
+    import requests
+    from packaging.version import parse as parse_version
     try:
         response = requests.get("https://api.github.com/repos/ks02149-star/test-2/releases/latest", timeout=10)
         response.raise_for_status()
@@ -242,62 +289,51 @@ def check_for_updates(manual_check=False):
             from PyQt5.QtWidgets import QMessageBox
             QMessageBox.critical(None, "오류", f"업데이트 확인 중 오류가 발생했습니다:\n{str(e)}\n\n인터넷 연결 상태를 확인해주세요.")
 
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, 
-                             QLabel, QFrame, QDialog, QMessageBox)
-from qfluentwidgets import (TitleLabel, SubtitleLabel, ComboBox, PushButton, 
-                            PrimaryPushButton, LineEdit, InfoBar, ScrollArea)
-from calendar import monthrange
-
-
-import json
-from src.config import DATA_DIR
-
-def load_companies():
-    path = os.path.join(DATA_DIR, 'companies.json')
-    if os.path.exists(path):
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception:
-            return []
-    return [{'name':'임시 업체 1','homepage':'https://www.naver.com','place':'','blog1':'https://blog.naver.com','blog2':'','instagram':'https://www.instagram.com'}]
-
-def save_companies(companies):
-    path = os.path.join(DATA_DIR, 'companies.json')
+# --- Safe File I/O (UTF-8 / CP949 Fallback) ---
+def safe_json_load(path, default=None):
+    if not os.path.exists(path):
+        return default if default is not None else {}
     try:
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(companies, f, ensure_ascii=False, indent=4)
-        return True
-    except Exception:
-        return False
-
-
-
-def get_holiday_checks_file_path():
-    from src.config import DATA_DIR
-    import os
-    os.makedirs(DATA_DIR, exist_ok=True)
-    return os.path.join(DATA_DIR, 'holiday_checks.json')
-
-def load_holiday_checks():
-    path = get_holiday_checks_file_path()
-    if os.path.exists(path):
+        with open(path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except UnicodeDecodeError:
         try:
-            with open(path, 'r', encoding='utf-8') as f:
+            with open(path, 'r', encoding='cp949') as f:
                 return json.load(f)
         except Exception:
-            return {}
-    return {}
+            return default if default is not None else {}
+    except Exception:
+        return default if default is not None else {}
 
-def save_holiday_checks(data):
-    path = get_holiday_checks_file_path()
+def safe_json_save(path, data):
     try:
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
         return True
     except Exception:
         return False
+
+def load_companies():
+    path = os.path.join(DATA_DIR, 'companies.json')
+    default_data = [{'name':'임시 업체 1','homepage':'https://www.naver.com','place':'','blog1':'https://blog.naver.com','blog2':'','instagram':'https://www.instagram.com'}]
+    data = safe_json_load(path, default=default_data)
+    if not data:
+        return default_data
+    return data
+
+def save_companies(companies):
+    path = os.path.join(DATA_DIR, 'companies.json')
+    return safe_json_save(path, companies)
+
+def get_holiday_checks_file_path():
+    os.makedirs(DATA_DIR, exist_ok=True)
+    return os.path.join(DATA_DIR, 'holiday_checks.json')
+
+def load_holiday_checks():
+    return safe_json_load(get_holiday_checks_file_path(), default={})
+
+def save_holiday_checks(data):
+    return safe_json_save(get_holiday_checks_file_path(), data)
 
 def get_korean_holidays(year):
     holidays = {
@@ -384,4 +420,3 @@ def get_korean_holidays(year):
             "2028-10-05": "대체공휴일"
         })
     return holidays
-
