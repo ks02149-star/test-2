@@ -156,16 +156,17 @@ class IndexCheckInterface(QWidget):
         
         dates = stats_data.get('dates', [])
         views = stats_data.get('views', [])
-        avg_time = stats_data.get('avg_time', '0초')
+        avg_time = stats_data.get('avg_time', {'my': 0, 'total': 0, 'top': 0, 'max': 0})
         inflow = stats_data.get('inflow', [])
         rank_posts = stats_data.get('rank_posts', [])
+        visit_table = stats_data.get('visit_table', [])
         
-        js_code = f"updateData({json.dumps(dates)}, {json.dumps(views)}, {json.dumps(avg_time)}, {json.dumps(inflow)}, {json.dumps(rank_posts)});"
+        js_code = f"updateData({json.dumps(dates)}, {json.dumps(views)}, {json.dumps(avg_time)}, {json.dumps(inflow)}, {json.dumps(rank_posts)}, {json.dumps(visit_table)});"
         self.chart_view.page().runJavaScript(js_code)
         
     def clear_chart(self):
         if not hasattr(self, 'chart_view'): return
-        js_code = "updateData([], [], '0초', [], []);"
+        js_code = "updateData([], [], {'my': 0, 'total': 0, 'top': 0, 'max': 0}, [], [], []);"
         self.chart_view.page().runJavaScript(js_code)
         
     def update_stats(self):
@@ -193,10 +194,7 @@ class IndexCheckInterface(QWidget):
         self.loading_ring.start()
         self.status_label.setText("크롬 드라이버 준비 중...")
         
-        naver_id = company_data.get('naver_id', '').strip()
-        naver_pw = company_data.get('naver_pw', '').strip()
-        
-        self.worker = StatsScraperWorker(blog_id, company_name, driver_path, naver_id, naver_pw)
+        self.worker = StatsScraperWorker(blog_id, company_name, driver_path)
         self.worker.status.connect(self.on_worker_status)
         self.worker.finished.connect(self.on_worker_finished)
         self.worker.error.connect(self.on_worker_error)
@@ -213,7 +211,17 @@ class IndexCheckInterface(QWidget):
         self.status_label.setText("데이터 업데이트 성공!")
         self.time_label.setText(f"최근 업데이트: {stats_data.get('last_updated', '')}")
         self.render_stats(stats_data)
-        InfoBar.success("성공", f"'{self.company_combo.currentText()}' 블로그 통계    def init_chart(self):
+        InfoBar.success("성공", f"'{self.company_combo.currentText()}' 블로그 통계 수집이 완료되었습니다.", duration=3000, parent=self)
+        
+    def on_worker_error(self, err_msg):
+        self.company_combo.setEnabled(True)
+        self.update_btn.setEnabled(True)
+        self.loading_ring.stop()
+        self.loading_ring.hide()
+        self.status_label.setText("실패")
+        MessageBox("오류 발생", f"통계 데이터 수집 중 오류가 발생했습니다:\n{err_msg}", self).exec_()
+        
+    def init_chart(self):
         is_dark = isDarkTheme()
         theme_str = 'dark' if is_dark else 'light'
         bg_color = '#202020' if is_dark else '#F3F3F3'
@@ -241,13 +249,18 @@ class IndexCheckInterface(QWidget):
                 
                 .dashboard {{
                     display: flex; flex-direction: column; width: 100%; min-height: 100%;
-                    padding: 20px; box-sizing: border-box; gap: 20px;
+                    padding: 20px; box-sizing: border-box;
                 }}
-                .summary-cards {{ display: flex; gap: 20px; height: 110px; flex-shrink: 0; }}
+                .dashboard > div {{ margin-bottom: 20px; }}
+                .dashboard > div:last-child {{ margin-bottom: 0; }}
+                
+                .summary-cards {{ display: flex; height: 140px; flex-shrink: 0; }}
+                .summary-cards > .card {{ margin-right: 20px; }}
+                .summary-cards > .card:last-child {{ margin-right: 0; }}
                 .card {{
                     flex: 1; background-color: {card_bg}; border: 1px solid {border_color};
                     border-radius: 12px; display: flex; flex-direction: column;
-                    justify-content: center; padding: 0 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+                    padding: 24px; box-sizing: border-box; box-shadow: 0 2px 8px rgba(0,0,0,0.05);
                 }}
                 .card-title {{ color: {text_color}; opacity: 0.7; font-size: 14px; font-weight: bold; }}
                 .card-value {{ color: {text_color}; font-size: 34px; font-weight: 800; margin-top: 6px; }}
@@ -257,7 +270,9 @@ class IndexCheckInterface(QWidget):
                     border: 1px solid {border_color}; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);
                 }}
                 
-                .tables-container {{ display: flex; gap: 20px; flex: 1; min-height: 300px; }}
+                .tables-container {{ display: flex; flex: 1; min-height: 300px; }}
+                .tables-container > .table-box {{ margin-right: 20px; }}
+                .tables-container > .table-box:last-child {{ margin-right: 0; }}
                 .table-box {{
                     flex: 1; background-color: {card_bg}; border: 1px solid {border_color};
                     border-radius: 12px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);
@@ -283,15 +298,23 @@ class IndexCheckInterface(QWidget):
             <div class="dashboard">
                 <div class="summary-cards">
                     <div class="card">
-                        <div class="card-title">게시글 평균사용시간 (최근 월 기준)</div>
-                        <div class="card-value" id="val-time">0초</div>
-                    </div>
-                    <div class="card">
                         <div class="card-title">최근 조회수 (마지막 월 기준)</div>
                         <div class="card-value" id="val-views">0</div>
                     </div>
+                    <div class="card" style="flex: 2;">
+                        <div class="card-title">게시글 평균사용시간 (최근 월 기준)</div>
+                        <div id="val-time-container"></div>
+                    </div>
                 </div>
                 <div class="chart-container" id="main"></div>
+                <div class="table-box">
+                    <div class="table-wrapper">
+                        <table style="text-align: center;">
+                            <thead><tr><th style="text-align:center;">기간</th><th style="text-align:center;">전체</th><th style="text-align:center;">피이웃</th><th style="text-align:center;">서로이웃</th><th style="text-align:center;">기타</th></tr></thead>
+                            <tbody id="tbody-visit"></tbody>
+                        </table>
+                    </div>
+                </div>
                 <div class="tables-container">
                     <div class="table-box">
                         <h3>검색 유입 분석 TOP 10</h3>
@@ -316,12 +339,14 @@ class IndexCheckInterface(QWidget):
             <script type="text/javascript">
                 var currentTheme = '{theme_str}';
                 var textCol = '{text_color}';
+                var cardBg = '{card_bg}';
+                var borderColor = '{border_color}';
                 var mainChart = echarts.init(document.getElementById('main'), currentTheme);
                 
                 var mainOption = {{
                     backgroundColor: 'transparent',
                     title: {{
-                        text: '월간 조회수 추이 (최근 6개월)',
+                        text: '월간 조회수 추이',
                         textStyle: {{ color: textCol, fontFamily: 'SUIT, sans-serif', fontSize: 16 }},
                         left: 20, top: 20
                     }},
@@ -361,12 +386,135 @@ class IndexCheckInterface(QWidget):
                 mainChart.setOption(mainOption);
                 window.onresize = function() {{ mainChart.resize(); }};
                 
-                function updateData(dates, views, avg_time, inflow, rank_posts) {{
+                function updateData(dates, views, avg_time, inflow, rank_posts, visit_table) {{
                     mainOption.xAxis[0].data = dates;
                     mainOption.series[0].data = views;
                     mainChart.setOption(mainOption);
                     
-                    document.getElementById('val-time').innerText = avg_time;
+                    // Render visit_table
+                    let tbody_visit = document.getElementById('tbody-visit');
+                    if (visit_table && visit_table.length > 0) {{
+                        let rows = '';
+                        for (let item of visit_table) {{
+                            rows += `<tr>
+                                <td style="text-align:center;">${{item.period}}</td>
+                                <td style="text-align:center;">${{item.total}}</td>
+                                <td style="text-align:center;">${{item.peer}}</td>
+                                <td style="text-align:center;">${{item.mutual}}</td>
+                                <td style="text-align:center;">${{item.other}}</td>
+                            </tr>`;
+                        }}
+                        tbody_visit.innerHTML = rows;
+                    }} else {{
+                        tbody_visit.innerHTML = '<tr><td colspan="5" style="text-align:center; padding: 20px;">데이터가 없습니다.</td></tr>';
+                    }}
+                    
+                    let my = avg_time.my || 0;
+                    let total = avg_time.total || 0;
+                    let top = avg_time.top || 0;
+                    let max = avg_time.max || 100;
+                    if (max === 0) max = Math.max(my, total, top, 1);
+                    
+                    let meaningful_max = Math.max(my, total, top);
+                    if (meaningful_max === 0) meaningful_max = 1;
+                    
+                    let is_broken = max > meaningful_max * 1.5;
+                    let my_pct, total_pct, top_pct;
+                    let broken_threshold = 82; // 82% width for the meaningful part
+                    
+                    if (is_broken) {{
+                        let scale_max = meaningful_max * 1.2;
+                        my_pct = Math.min((my / scale_max) * broken_threshold, broken_threshold);
+                        total_pct = Math.min((total / scale_max) * broken_threshold, broken_threshold);
+                        top_pct = Math.min((top / scale_max) * broken_threshold, broken_threshold);
+                    }} else {{
+                        my_pct = (my / max) * 100;
+                        total_pct = (total / max) * 100;
+                        top_pct = (top / max) * 100;
+                    }}
+                    
+                    // Staggering labels if they overlap
+                    let total_transform = "translateX(-50%)";
+                    let total_align = "center";
+                    let top_transform = "translateX(-50%)";
+                    let top_align = "center";
+
+                    if (Math.abs(total_pct - top_pct) < 15) {{
+                        if (total_pct <= top_pct) {{
+                            total_transform = "translateX(-100%)";
+                            total_align = "right";
+                            top_transform = "translateX(0%)";
+                            top_align = "left";
+                        }} else {{
+                            top_transform = "translateX(-100%)";
+                            top_align = "right";
+                            total_transform = "translateX(0%)";
+                            total_align = "left";
+                        }}
+                    }}
+                    
+                    let barBg = currentTheme === 'dark' ? '#3A3A3A' : '#EAECEF';
+                    let darkBarBg = currentTheme === 'dark' ? '#555' : '#8A8F9B';
+                    
+                    let barTop = 10;
+                    let circleTop = 18;
+                    let textTop = 32;
+                    let textTotalTop = textTop;
+                    let textTopTop = textTop;
+                    let total_height = 22;
+                    let top_height = 22;
+                    
+                    let html = `
+                    <div style="position: relative; width: calc(100% - 40px); margin: 16px 20px 0 20px; height: 60px; font-family: 'SUIT', sans-serif;">
+                        
+                        <!-- The Background Bar -->
+                        <div style="position: absolute; left: 0; right: 0; top: ${{barTop}}px; height: 16px; background: ${{barBg}}; z-index: 1;"></div>
+                        
+                        ${{is_broken ? `
+                        <!-- Broken Axis Darker Part -->
+                        <div style="position: absolute; left: ${{broken_threshold}}%; right: 0; top: ${{barTop}}px; height: 16px; background: ${{darkBarBg}}; z-index: 2;"></div>
+                        <!-- The Wave -->
+                        <div style="position: absolute; left: ${{broken_threshold}}%; top: ${{barTop}}px; width: 10px; height: 16px; z-index: 3; transform: translateX(-50%);">
+                            <svg width="10" height="16" viewBox="0 0 10 16">
+                                <path d="M5 0 Q10 2 5 4 T5 8 Q10 10 5 12 T5 16" stroke="${{cardBg}}" stroke-width="3" fill="none"/>
+                            </svg>
+                        </div>
+                        ` : ''}}
+                        
+                        <!-- The Green Bar (0 to My Pct) -->
+                        <div style="position: absolute; left: 0; width: ${{my_pct}}%; top: ${{barTop}}px; height: 16px; background: #00C73C; z-index: 4;"></div>
+                        
+                        <!-- The Circle -->
+                        <div style="position: absolute; left: ${{my_pct}}%; top: ${{circleTop}}px; transform: translate(-50%, -50%); width: 14px; height: 14px; border-radius: 50%; background: #FFF; border: 3px solid #00C73C; z-index: 5;"></div>
+                        
+                        <!-- 0 Text (Only if circle is far enough) -->
+                        ${{my_pct > 8 ? `<div style="position: absolute; left: 0; top: ${{textTop}}px; font-size: 11px; color: ${{textCol}}; opacity: 0.6; transform: translateX(-50%);">0</div>` : ''}}
+                        
+                        <!-- My Value Text under circle -->
+                        <div style="position: absolute; left: ${{my_pct}}%; top: ${{textTop}}px; font-size: 12px; color: #00C73C; font-weight: bold; transform: translateX(-50%); z-index: 6;">${{my}}</div>
+                        
+                        <!-- Max Text -->
+                        <div style="position: absolute; right: 0; top: ${{textTop}}px; font-size: 11px; color: ${{textCol}}; opacity: 0.6; transform: translateX(50%);">${{max.toLocaleString()}}</div>
+                        
+                        <!-- Service Total Line & Text -->
+                        ${{total > 0 ? `
+                        <div style="position: absolute; left: ${{total_pct}}%; top: ${{barTop}}px; height: ${{total_height}}px; width: 1px; border-left: 1px dotted ${{textCol}}; opacity: 0.5; z-index: 4;"></div>
+                        <div style="position: absolute; left: ${{total_pct}}%; top: ${{textTotalTop}}px; transform: ${{total_transform}}; text-align: ${{total_align}}; font-size: 10px; color: ${{textCol}}; opacity: 0.7; white-space: nowrap; line-height: 1.2; padding: 0 4px;">
+                            <span style="font-size: 12px; font-weight: bold;">${{total}}</span><br>서비스 전체 평균
+                        </div>
+                        ` : ''}}
+                        
+                        <!-- Top Group Line & Text -->
+                        ${{top > 0 ? `
+                        <div style="position: absolute; left: ${{top_pct}}%; top: ${{barTop}}px; height: ${{top_height}}px; width: 1px; border-left: 1px dotted #5C80F8; z-index: 4;"></div>
+                        <div style="position: absolute; left: ${{top_pct}}%; top: ${{textTopTop}}px; transform: ${{top_transform}}; text-align: ${{top_align}}; font-size: 10px; color: #5C80F8; white-space: nowrap; line-height: 1.2; padding: 0 4px;">
+                            <span style="font-size: 12px; font-weight: bold;">${{top}}</span><br>상위 그룹 평균
+                        </div>
+                        ` : ''}}
+                    </div>
+                    `;
+                    document.getElementById('val-time-container').innerHTML = html;
+                    
                     let total_views = views.length > 0 ? views[views.length - 1] : 0;
                     document.getElementById('val-views').innerText = total_views.toLocaleString();
                     
@@ -375,11 +523,13 @@ class IndexCheckInterface(QWidget):
                         inflowHtml = '<tr><td colspan="4" style="text-align:center; opacity:0.6; padding:30px;">데이터가 없습니다.</td></tr>';
                     }} else {{
                         for(let i=0; i<inflow.length; i++) {{
+                            let p = inflow[i].percent || 0;
+                            let v = inflow[i].value || 0;
                             inflowHtml += `<tr>
                                 <td>${{i+1}}</td>
                                 <td><span class="ellipsis" title="${{inflow[i].name}}">${{inflow[i].name}}</span></td>
-                                <td>${{inflow[i].percent.toFixed(1)}}%</td>
-                                <td>${{inflow[i].value.toLocaleString()}}</td>
+                                <td>${{p.toFixed(1)}}%</td>
+                                <td>${{v.toLocaleString()}}</td>
                             </tr>`;
                         }}
                     }}
@@ -421,6 +571,8 @@ class IndexCheckInterface(QWidget):
                     
                     currentTheme = newTheme;
                     textCol = newTextColor;
+                    cardBg = newCardBg;
+                    borderColor = newBorderColor;
                     
                     mainChart.dispose();
                     mainChart = echarts.init(document.getElementById('main'), currentTheme);

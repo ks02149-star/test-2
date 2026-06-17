@@ -224,8 +224,6 @@ class CompanyDialog(QDialog):
             ('homepage', '홈페이지 주소'),
             ('place', '플레이스 주소'),
             ('blog_id', '네이버 블로그 ID'),
-            ('naver_id', '네이버 로그인 아이디'),
-            ('naver_pw', '네이버 로그인 비밀번호'),
             ('blog1', '블로그 1 주소'),
             ('blog2', '블로그 2 주소'),
             ('instagram', '인스타그램 주소')
@@ -240,10 +238,7 @@ class CompanyDialog(QDialog):
             row_layout.addWidget(lbl)
             self.labels.append((lbl, key == 'name'))
             
-            if key == 'naver_pw':
-                edit = PasswordLineEdit(self)
-            else:
-                edit = LineEdit(self)
+            edit = LineEdit(self)
                 
             edit.setPlaceholderText(f"{label} 입력")
             if company_data:
@@ -361,8 +356,6 @@ class CompanyDialog(QDialog):
             'homepage': self.inputs['homepage'].text().strip(),
             'place': self.inputs['place'].text().strip(),
             'blog_id': self.inputs['blog_id'].text().strip(),
-            'naver_id': self.inputs['naver_id'].text().strip(),
-            'naver_pw': self.inputs['naver_pw'].text().strip(),
             'blog1': self.inputs['blog1'].text().strip(),
             'blog2': self.inputs['blog2'].text().strip(),
             'instagram': self.inputs['instagram'].text().strip()

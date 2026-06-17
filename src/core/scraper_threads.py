@@ -516,246 +516,377 @@ class StatsScraperWorker(QThread):
             self.status.emit("크롬 드라이버 준비 중...")
             if not self.global_driver_path:
                 try:
+                    from webdriver_manager.chrome import ChromeDriverManager
                     self.global_driver_path = ChromeDriverManager().install()
+                    from src.utils.driver_manager import patch_chromedriver
+                    patch_chromedriver(self.global_driver_path)
                 except Exception as e:
                     self.error.emit(f"드라이버 설치 실패: {e}")
                     return
             
             self.status.emit("크롬 브라우저를 구동 중입니다...")
             from src.utils.driver_manager import setup_chrome_options
-            options = setup_chrome_options()
+            options = setup_chrome_options(headless=False)
             
-            # Setup Chrome User Data Profile Directory for session persistence
+            import sys, os
+            from selenium.webdriver.chrome.service import Service
+            from selenium import webdriver
+            import time
+            from datetime import datetime
+            import json
+            import re
+            from PyQt5.QtCore import QDate
+            from selenium.webdriver.common.by import By
+            from selenium.webdriver.support.ui import WebDriverWait
+            from selenium.webdriver.support import expected_conditions as EC
+            
             base_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
             profile_dir = os.path.join(base_dir, "Data", "ChromeProfiles", self.blog_id)
             os.makedirs(profile_dir, exist_ok=True)
-            
+            options.add_argument(f"--user-data-dir={profile_dir}")
             
             service = Service(self.global_driver_path)
             self.driver = webdriver.Chrome(service=service, options=options)
-            self.driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": "Object.defineProperty(navigator, \'webdriver\', { get: () => undefined })"})
+            self.driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": "Object.defineProperty(navigator, 'webdriver', { get: () => undefined })"})
             
-            self.status.emit("네이버 블로그 통계 페이지로 이동 중...")
-            target_url = f"https://blog.stat.naver.com/blog/visitor/daily?blogId={self.blog_id}"
-            self.driver.get(target_url)
+            urls = [
+                f"https://admin.blog.naver.com/{self.blog_id}/stat/visit_pv",
+                f"https://admin.blog.naver.com/{self.blog_id}/stat/average_upperGroup",
+                f"https://admin.blog.naver.com/{self.blog_id}/stat/referer",
+                f"https://admin.blog.naver.com/{self.blog_id}/stat/rank_pv"
+            ]
             
-            # Detect if we need to login
+            self.status.emit("네이버 블로그 통계 페이지 접속 및 로그인 상태 확인 중...")
+            self.driver.get(urls[0])
+            
             login_wait_start = time.time()
             logged_in = False
-            auto_login_attempted = False
             
-            while time.time() - login_wait_start < 60:  # Wait up to 60 seconds
+            while time.time() - login_wait_start < 120:
                 try:
                     curr_url = self.driver.current_url
                 except Exception:
                     self.error.emit("사용자가 브라우저를 종료했거나 통신이 끊겼습니다.")
                     return
                 
+                if not curr_url:
+                    time.sleep(1)
+                    continue
+                
                 if "nid.naver.com" in curr_url:
-                    if self.naver_id and self.naver_pw and not auto_login_attempted:
-                        self.status.emit("등록된 계정으로 자동 로그인 우회 시도 중...")
-                        try:
-                            from PyQt5.QtWidgets import QApplication
-                            from selenium.webdriver.common.keys import Keys
-                            
-                            clipboard = QApplication.clipboard()
-                            
-                            id_input = WebDriverWait(self.driver, 5).until(EC.presence_of_element_located((By.ID, "id")))
-                            id_input.click()
-                            clipboard.setText(self.naver_id)
-                            id_input.send_keys(Keys.CONTROL, 'v')
-                            time.sleep(0.3)
-                            
-                            pw_input = self.driver.find_element(By.ID, "pw")
-                            pw_input.click()
-                            clipboard.setText(self.naver_pw)
-                            pw_input.send_keys(Keys.CONTROL, 'v')
-                            time.sleep(0.3)
-                            
-                            login_btn = self.driver.find_element(By.ID, "log.login")
-                            login_btn.click()
-                            time.sleep(2.0)
-                        except Exception as e:
-                            self.log(f"자동 로그인 주입 오류: {e}")
-                        
-                        auto_login_attempted = True
-                        time.sleep(2.0)
-                        continue
-                    
-                    if auto_login_attempted:
-                        # If still on nid.naver.com after attempting login, it likely failed or hit captcha
-                        try:
-                            captcha = self.driver.find_elements(By.ID, "captcha")
-                            err_msg = self.driver.find_elements(By.CLASS_NAME, "error_message")
-                            if captcha or (err_msg and err_msg[0].is_displayed()):
-                                self.error.emit("수동 로그인 필요 (캡차 또는 보호조치 감지)")
-                                self.cleanup()
-                                return
-                        except Exception:
-                            pass
-                            
-                    self.status.emit("로그인 및 2차 인증 대기 중... (브라우저에서 로그인해 주세요)")
-                elif "blog.stat.naver.com" in curr_url:
-                    try:
-                        WebDriverWait(self.driver, 5).until(
-                            EC.presence_of_element_located((By.CSS_SELECTOR, "body"))
-                        )
+                    self.status.emit("로그인 및 2차 인증 대기 중... (브라우저에서 직접 로그인해 주세요)")
+                else:
+                    if "stat" in curr_url:
                         logged_in = True
                         break
-                    except Exception:
-                        pass
-                
-                time.sleep(2)
+                    else:
+                        self.status.emit("네이버에 의해 기본 관리자 홈으로 이동되었습니다. 통계 페이지로 재진입합니다...")
+                        self.driver.get(urls[0])
+                        time.sleep(2)
+                time.sleep(1)
                 
             if not logged_in:
                 self.error.emit("로그인 대기 시간이 초과되었습니다.")
-                self.cleanup()
+                if self.driver: self.driver.quit()
                 return
+
+            self.status.emit("로그인 완료! 내부 API의 404 오류를 우회하기 위해 멀티 탭 DOM 스크래핑을 시작합니다...")
+            
+            for url in urls[1:]:
+                time.sleep(0.5)
+                self.driver.switch_to.new_window('tab')
+                self.driver.get(url)
                 
-            self.status.emit("로그인 완료 감지! 블로그 통계 데이터를 수집 중...")
+            time.sleep(4)
             
-            end_month = QDate.currentDate().toString("yyyy-MM")
-            start_month = QDate.currentDate().addMonths(-6).toString("yyyy-MM")
+            handles = self.driver.window_handles
+            results = []
             
-            # 1. Monthly Views
-            js_views = f"""
-            var callback = arguments[arguments.length - 1];
-            fetch('/api/views/monthly?blogId={self.blog_id}&startDate={start_month}&endDate={end_month}')
-                .then(res => res.json())
-                .then(data => callback(data))
-                .catch(err => callback(null));
+            js_click_monthly = """
+                let btns = document.querySelectorAll('a, button');
+                let clicked = false;
+                for (let b of btns) {
+                    if (b.innerText.trim() === '월간' || b.getAttribute('data-nclk') === 'monthly') {
+                        b.click();
+                        clicked = true;
+                        break;
+                    }
+                }
+                return clicked;
             """
-            self.driver.set_script_timeout(10)
-            res_views = self.driver.execute_async_script(js_views)
             
-            # 2. Average Time (Monthly)
-            js_time = f"""
-            var callback = arguments[arguments.length - 1];
-            fetch('/api/blog/average/time?timeDimension=MONTH&startDate={start_month}&endDate={end_month}&blogId={self.blog_id}')
-                .then(res => res.json())
-                .then(data => callback(data))
-                .catch(err => callback(null));
-            """
-            res_time = self.driver.execute_async_script(js_time)
-            
-            # 3. Search Inflow
-            js_inflow = f"""
-            var callback = arguments[arguments.length - 1];
-            fetch('/api/inflow/monthly/search?blogId={self.blog_id}&startDate={end_month}&endDate={end_month}')
-                .then(res => res.json())
-                .then(data => callback(data))
-                .catch(err => callback(null));
-            """
-            res_inflow = self.driver.execute_async_script(js_inflow)
-            
-            # 4. View Rank
-            js_rank = f"""
-            var callback = arguments[arguments.length - 1];
-            fetch('/api/blog/rank/cvContentPc?timeDimension=MONTH&startDate={end_month}&blogId={self.blog_id}')
-                .then(res => res.json())
-                .then(data => callback(data))
-                .catch(err => callback(null));
-            """
-            res_rank = self.driver.execute_async_script(js_rank)
-            
-            # Parsing monthly stats
-            dates = []
-            views_cnts = []
-            avg_time = "0초"
-            inflow_paths = []
-            rank_posts = []
-            
-            # Process views
-            try:
-                raw_list = res_views.get('result', {}).get('monthlyViews', [])
-                # Sometimes the key is different depending on exact API response, fallback to parsing generic object
-                if not raw_list:
-                    for k, v in res_views.get('result', {}).items():
-                        if isinstance(v, list) and len(v) > 0 and 'views' in v[0]:
-                            raw_list = v
-                            break
-                            
-                for item in raw_list:
-                    dt = str(item.get('date', ''))
-                    if len(dt) == 6:
-                        formatted_dt = f"{dt[0:4]}-{dt[4:6]}"
-                    else:
-                        formatted_dt = dt
-                    dates.append(formatted_dt)
-                    views_cnts.append(item.get('views', 0))
-            except Exception:
-                pass
-                
-            # Process avg time (latest month)
-            try:
-                raw_list = res_time.get('result', {}).get('blogAverageTimeList', [])
-                if raw_list:
-                    latest = raw_list[-1]
-                    avg_time = f"{latest.get('averageTime', 0)}초"
-            except Exception:
-                pass
-            
-            # Process search inflow paths
-            try:
-                # Determine where the data is
-                raw_list = []
-                for k, v in res_inflow.get('result', {}).items():
-                    if isinstance(v, list) and len(v) > 0 and 'count' in v[0]:
-                        raw_list = v
-                        break
+            js_extractors = {
+                'visit_pv': """
+                    // 1. 날짜 추출 (tspan 중복 방지)
+                    let dates = Array.from(document.querySelectorAll('.c3-axis-x .tick text')).map(e => {
+                        let raw = e.textContent.replace(/\s+/g, '');
+                        let m = raw.match(/(\d{4})-(\d{2})/);
+                        if(m) return m[1].substring(2) + '.' + m[2];
+                        return raw;
+                    });
+                    
+                    // 2. Y축의 픽셀(cy)과 실제 값의 비율 계산 (수학적 역추산)
+                    let y_ticks = document.querySelectorAll('.c3-axis-y .tick');
+                    let y_map = [];
+                    for (let tick of y_ticks) {
+                        let transform = tick.getAttribute('transform');
+                        let m = transform ? transform.match(/translate\([^,]+,\s*([-\d.]+)\)/) : null;
+                        let val = parseFloat(tick.textContent.replace(/,/g, ''));
+                        if (m && !isNaN(val)) {
+                            y_map.push({ y: parseFloat(m[1]), val: val });
+                        }
+                    }
+                    y_map.sort((a, b) => a.y - b.y);
+                    
+                    let get_val = (cy) => {
+                        if (y_map.length === 0) return 0;
+                        if (y_map.length === 1) return y_map[0].val;
                         
-                for item in raw_list[:10]:  # Top 10
-                    inflow_paths.append({
-                        'name': item.get('keyword', item.get('source', '알 수 없음')),
-                        'value': item.get('count', 0),
-                        'percent': item.get('percent', 0.0)
-                    })
-            except Exception:
-                pass
-                
-            # Process View Rank posts
-            try:
-                raw_list = res_rank.get('result', {}).get('cvContentPc', [])
-                if not raw_list:
-                    for k, v in res_rank.get('result', {}).items():
-                        if isinstance(v, list) and len(v) > 0 and 'contentTitle' in v[0]:
-                            raw_list = v
-                            break
-                            
-                for item in raw_list[:10]:
-                    rank_posts.append({
-                        'title': item.get('contentTitle', '제목 없음'),
-                        'views': item.get('count', 0)
-                    })
-            except Exception:
-                pass
-                
-            if not dates:
-                # If everything failed, try to mock or emit error
-                self.error.emit("데이터를 파싱하지 못했거나 권한이 없습니다.")
-                self.cleanup()
-                return
-                
+                        for (let i = 0; i < y_map.length - 1; i++) {
+                            let p1 = y_map[i];
+                            let p2 = y_map[i+1];
+                            if (cy >= p1.y && cy <= p2.y) {
+                                let ratio = (cy - p1.y) / (p2.y - p1.y);
+                                return p1.val + ratio * (p2.val - p1.val);
+                            }
+                        }
+                        if (cy < y_map[0].y) {
+                            let p1 = y_map[0], p2 = y_map[1];
+                            let ratio = (cy - p1.y) / (p2.y - p1.y);
+                            return p1.val + ratio * (p2.val - p1.val);
+                        } else {
+                            let p1 = y_map[y_map.length - 2], p2 = y_map[y_map.length - 1];
+                            let ratio = (cy - p1.y) / (p2.y - p1.y);
+                            return p1.val + ratio * (p2.val - p1.val);
+                        }
+                    };
+
+                    // 3. 점(circle)들의 cy 좌표를 실제 데이터 값으로 변환
+                    let views = [];
+                    let circles = document.querySelectorAll('.c3-target-전체-조회수 .c3-circle');
+                    if(circles.length === 0) circles = document.querySelectorAll('.c3-chart-line .c3-circle');
+                    if(circles.length === 0) circles = document.querySelectorAll('.c3-circle');
+                    
+                    for (let c of circles) {
+                        let cy = parseFloat(c.getAttribute('cy'));
+                        if (!isNaN(cy)) {
+                            // 소수점 보정 후 반올림하여 정확한 조회수 도출
+                            let val = Math.round(get_val(cy));
+                            if (val < 0) val = 0;
+                            views.push(val);
+                        }
+                    }
+                    
+                    // Fallback: 역추산 실패 시 __data__ 시도
+                    if (views.length === 0 || views.every(v => v === 0)) {
+                        views = [];
+                        for(let c of circles) {
+                            if(c.__data__ && c.__data__.value !== undefined) {
+                                views.push(c.__data__.value);
+                            }
+                        }
+                    }
+                    
+                    // 4. 테이블 파싱 (전체, 피이웃, 서로이웃, 기타)
+                    let visit_table = [];
+                    let table_rows = document.querySelectorAll('div[class*="u_ni_table_component"] table tbody tr');
+                    for (let row of table_rows) {
+                        let th = row.querySelector('th');
+                        let tds = row.querySelectorAll('td');
+                        if (th && tds.length >= 4) {
+                            visit_table.push({
+                                period: th.innerText.trim(),
+                                total: tds[0].innerText.trim(),
+                                peer: tds[1].innerText.trim(),
+                                mutual: tds[2].innerText.trim(),
+                                other: tds[3].innerText.trim()
+                            });
+                        }
+                    }
+                    
+                    return { type: 'visit_pv', dates: dates, views: views, visit_table: visit_table };
+                """,
+                'average_upperGroup': """
+                    let my_avg = "0";
+                    let total_avg = "0";
+                    let top_avg = "0";
+                    let max_val = "0";
+                    
+                    let titles = document.querySelectorAll('strong[class^="u_ni_title_"]');
+                    for (let t of titles) {
+                        if (t.innerText.includes('내 블로그 평균')) {
+                            let valDiv = t.parentElement.querySelector('div[class^="u_ni_value_"]');
+                            if (valDiv) my_avg = valDiv.innerText.replace(/,/g, '').trim();
+                        }
+                    }
+                    
+                    let items = document.querySelectorAll('div[class^="u_ni_bd_txt_"]');
+                    for (let item of items) {
+                        if (item.innerText.includes('서비스 전체 평균')) {
+                            let valDiv = item.parentElement.querySelector('div[class^="u_ni_bd_count_"]');
+                            if (valDiv) total_avg = valDiv.innerText.replace(/,/g, '').trim();
+                        } else if (item.innerText.includes('상위 그룹 평균')) {
+                            let valDiv = item.parentElement.querySelector('div[class^="u_ni_bd_count_"]');
+                            if (valDiv) top_avg = valDiv.innerText.replace(/,/g, '').trim();
+                        }
+                    }
+                    
+                    let axisTexts = document.querySelectorAll('div[class*="axis_txt_"]');
+                    for (let txt of axisTexts) {
+                        if (txt.className.includes('last_')) {
+                            max_val = txt.innerText.replace(/,/g, '').trim();
+                        }
+                    }
+                    
+                    return { type: 'average_time', my_avg: my_avg, total_avg: total_avg, top_avg: top_avg, max_val: max_val };
+                """,
+                'referer': """
+                    let inflow = [];
+                    // 신규 UI 테이블 파싱
+                    let rows = document.querySelectorAll('div[class*="u_ni_table_component"] table tbody tr');
+                    if (rows.length > 0) {
+                        for (let row of rows) {
+                            let cells = Array.from(row.querySelectorAll('td')).map(e => e.innerText.trim());
+                            if (cells.length >= 3) {
+                                let name = cells[1];
+                                let percent = parseFloat(cells[2].replace(/,/g, '').replace('%', '')) || 0;
+                                let count = 0;
+                                if (cells.length >= 4) {
+                                    count = parseInt(cells[3].replace(/,/g, '')) || 0;
+                                }
+                                inflow.push({ name: name, percent: percent, value: count });
+                            }
+                        }
+                    } else {
+                        // 구형 UI 혹은 리스트 fallback
+                        let items = document.querySelectorAll('li[class*="item"]');
+                        for (let item of items) {
+                            let text = item.innerText;
+                            let m = text.match(/(.+?)\\s+([\\d.]+)%/);
+                            if (m) {
+                                inflow.push({ name: m[1].trim(), percent: parseFloat(m[2]), value: 0 });
+                            }
+                        }
+                    }
+                    return { type: 'referer', inflow: inflow };
+                """,
+                'rank_pv': """
+                    let rank = [];
+                    // 신규 UI 테이블 파싱
+                    let rows = document.querySelectorAll('div[class*="u_ni_table_component"] table tbody tr');
+                    if (rows.length > 0) {
+                        for (let row of rows) {
+                            let cells = Array.from(row.querySelectorAll('td')).map(e => e.innerText.trim());
+                            if (cells.length >= 3) {
+                                let title = cells[1];
+                                let count = parseInt(cells[2].replace(/,/g, '')) || 0;
+                                rank.push({ title: title, views: count });
+                            }
+                        }
+                    } else {
+                        // 기존 로직 Fallback
+                        rows = document.querySelectorAll('table tbody tr');
+                        for (let row of rows) {
+                            let cells = Array.from(row.querySelectorAll('td')).map(e => e.innerText.trim());
+                            if (cells.length >= 3) {
+                                let title = cells[1];
+                                let count = parseInt(cells[cells.length - 1].replace(/,/g, '')) || 0;
+                                rank.push({ title: title, views: count });
+                            }
+                        }
+                    }
+                    return { type: 'rank_pv', rank_posts: rank };
+                """
+            }
+
+            for handle in handles:
+                try:
+                    self.driver.switch_to.window(handle)
+                    time.sleep(0.5)
+                    curr_url = self.driver.current_url
+                    
+                    target_extractor = None
+                    if "visit_pv" in curr_url: target_extractor = js_extractors['visit_pv']
+                    elif "average_upperGroup" in curr_url: target_extractor = js_extractors['average_upperGroup']
+                    elif "referer" in curr_url: target_extractor = js_extractors['referer']
+                    elif "rank_pv" in curr_url: target_extractor = js_extractors['rank_pv']
+                    
+                    if not target_extractor:
+                        continue
+                    
+                    self.driver.switch_to.default_content()
+                    try:
+                        main_frame = WebDriverWait(self.driver, 3).until(EC.presence_of_element_located((By.NAME, "mainFrame")))
+                        self.driver.switch_to.frame(main_frame)
+                    except: pass
+                    
+                    try:
+                        stat_frame = WebDriverWait(self.driver, 3).until(EC.presence_of_element_located((By.ID, "statmain")))
+                        self.driver.switch_to.frame(stat_frame)
+                    except: pass
+                    
+                    # 월간 버튼 클릭
+                    self.driver.execute_script(js_click_monthly)
+                    time.sleep(2) # 데이터 로딩 대기
+                    
+                    if "referer" in curr_url:
+                        self.driver.execute_script("""
+                            let search_tab = document.querySelector('a[data-nclk="search"]');
+                            if (search_tab) search_tab.click();
+                        """)
+                        time.sleep(2) # 검색 유입 탭 로딩 대기
+                        
+                    
+                    extracted = self.driver.execute_script(target_extractor)
+                    results.append(extracted)
+                    
+                except Exception as e:
+                    pass
+            
             stats_data = {
-                'last_updated': time.strftime("%Y-%m-%d %H:%M:%S"),
-                'dates': dates,
-                'views': views_cnts,
-                'avg_time': avg_time,
-                'inflow': inflow_paths,
-                'rank_posts': rank_posts
+                'dates': ['1월', '2월', '3월', '4월', '5월', '6월'],
+                'views': [0, 0, 0, 0, 0, 0],
+                'avg_time': {'my': 0, 'total': 0, 'top': 0, 'max': 0},
+                'visit_table': [],
+                'inflow': [],
+                'rank_posts': [],
+                'last_updated': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
             
-            # Save to JSON file
-            data_dir = os.path.join(base_dir, "Data")
-            stats_path = os.path.join(data_dir, f"stats_{self.company_name}.json")
-            safe_json_save(stats_path, stats_data)
-                
+            for res in results:
+                if not res: continue
+                if res.get('type') == 'visit_pv':
+                    dates = res.get('dates', [])
+                    views = res.get('views', [])
+                    if len(dates) > 0 and len(views) > 0:
+                        min_len = min(len(dates), len(views))
+                        stats_data['dates'] = dates[-min_len:]
+                        stats_data['views'] = views[-min_len:]
+                    stats_data['visit_table'] = res.get('visit_table', [])[:2]
+                elif res.get('type') == 'average_time':
+                    stats_data['avg_time'] = {
+                        'my': int(res.get('my_avg', 0)) if str(res.get('my_avg', 0)).isdigit() else 0,
+                        'total': int(res.get('total_avg', 0)) if str(res.get('total_avg', 0)).isdigit() else 0,
+                        'top': int(res.get('top_avg', 0)) if str(res.get('top_avg', 0)).isdigit() else 0,
+                        'max': int(res.get('max_val', 0)) if str(res.get('max_val', 0)).isdigit() else 0
+                    }
+                elif res.get('type') == 'referer':
+                    inflow = res.get('inflow', [])
+                    inflow.sort(key=lambda x: x.get('percent', 0), reverse=True)
+                    stats_data['inflow'] = inflow[:10]
+                elif res.get('type') == 'rank_pv':
+                    stats_data['rank_posts'] = res.get('rank_posts', [])[:10]
+            
+            try: self.driver.quit()
+            except: pass
+            
             self.finished.emit(stats_data)
             
         except Exception as e:
-            self.error.emit(f"오류가 발생했습니다: {e}")
-        finally:
-            self.cleanup()
+            if self.driver:
+                try: self.driver.quit()
+                except: pass
+            self.error.emit(str(e))
 
     def cleanup(self):
         if self.driver:
