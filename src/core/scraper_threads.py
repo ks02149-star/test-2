@@ -547,6 +547,12 @@ class StatsScraperWorker(QThread):
             
             service = Service(self.global_driver_path)
             self.driver = webdriver.Chrome(service=service, options=options)
+            
+            # 크롬 프로필에 이전 종료 시의 좌표(화면 밖)가 저장되어 있을 수 있으므로 화면 안으로 원복
+            try:
+                self.driver.set_window_position(0, 0)
+            except: pass
+            
             self.driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": "Object.defineProperty(navigator, 'webdriver', { get: () => undefined })"})
             
             urls = [
@@ -592,12 +598,15 @@ class StatsScraperWorker(QThread):
 
             self.status.emit("로그인 완료! 내부 API의 404 오류를 우회하기 위해 멀티 탭 DOM 스크래핑을 시작합니다...")
             
+            # 메인 로그인 창 화면 밖으로 숨김 (대안 B 적용)
+            self.driver.set_window_position(-10000, -10000)
+            
             for url in urls[1:]:
-                time.sleep(0.5)
-                self.driver.switch_to.new_window('tab')
+                self.driver.switch_to.new_window('window')
+                self.driver.set_window_position(-10000, -10000)
                 self.driver.get(url)
                 
-            time.sleep(4)
+            time.sleep(2.0)
             
             handles = self.driver.window_handles
             results = []
@@ -799,10 +808,56 @@ class StatsScraperWorker(QThread):
                 """
             }
 
+            # Phase 1: 4개의 창을 순회하며 '월간' 버튼 클릭
             for handle in handles:
                 try:
                     self.driver.switch_to.window(handle)
-                    time.sleep(0.5)
+                    self.driver.switch_to.default_content()
+                    try:
+                        main_frame = WebDriverWait(self.driver, 1).until(EC.presence_of_element_located((By.NAME, "mainFrame")))
+                        self.driver.switch_to.frame(main_frame)
+                    except: pass
+                    try:
+                        stat_frame = WebDriverWait(self.driver, 1).until(EC.presence_of_element_located((By.ID, "statmain")))
+                        self.driver.switch_to.frame(stat_frame)
+                    except: pass
+                    
+                    self.driver.execute_script(js_click_monthly)
+                except Exception:
+                    pass
+                    
+            # 4개의 창 데이터 동시 로딩 대기 (안정성을 위해 2.0초로 복구)
+            time.sleep(2.0)
+            
+            # Phase 2: 검색 유입 탭이 있는 경우 버튼 클릭
+            for handle in handles:
+                try:
+                    self.driver.switch_to.window(handle)
+                    if "referer" in self.driver.current_url:
+                        self.driver.switch_to.default_content()
+                        try:
+                            main_frame = WebDriverWait(self.driver, 1).until(EC.presence_of_element_located((By.NAME, "mainFrame")))
+                            self.driver.switch_to.frame(main_frame)
+                        except: pass
+                        try:
+                            stat_frame = WebDriverWait(self.driver, 1).until(EC.presence_of_element_located((By.ID, "statmain")))
+                            self.driver.switch_to.frame(stat_frame)
+                        except: pass
+                        
+                        self.driver.execute_script("""
+                            let search_tab = document.querySelector('a[data-nclk="search"]');
+                            if (search_tab) search_tab.click();
+                        """)
+                except Exception:
+                    pass
+                    
+            # 탭 이동 후 동시 로딩 대기 (안정성을 위해 2.0초로 복구)
+            time.sleep(2.0)
+            
+            # Phase 3: 4개의 창 데이터 일괄 추출
+            for handle in handles:
+                try:
+                    self.driver.switch_to.window(handle)
                     curr_url = self.driver.current_url
                     
                     target_extractor = None
@@ -813,33 +868,19 @@ class StatsScraperWorker(QThread):
                     
                     if not target_extractor:
                         continue
-                    
+                        
                     self.driver.switch_to.default_content()
                     try:
-                        main_frame = WebDriverWait(self.driver, 3).until(EC.presence_of_element_located((By.NAME, "mainFrame")))
+                        main_frame = WebDriverWait(self.driver, 1).until(EC.presence_of_element_located((By.NAME, "mainFrame")))
                         self.driver.switch_to.frame(main_frame)
                     except: pass
-                    
                     try:
-                        stat_frame = WebDriverWait(self.driver, 3).until(EC.presence_of_element_located((By.ID, "statmain")))
+                        stat_frame = WebDriverWait(self.driver, 1).until(EC.presence_of_element_located((By.ID, "statmain")))
                         self.driver.switch_to.frame(stat_frame)
                     except: pass
                     
-                    # 월간 버튼 클릭
-                    self.driver.execute_script(js_click_monthly)
-                    time.sleep(2) # 데이터 로딩 대기
-                    
-                    if "referer" in curr_url:
-                        self.driver.execute_script("""
-                            let search_tab = document.querySelector('a[data-nclk="search"]');
-                            if (search_tab) search_tab.click();
-                        """)
-                        time.sleep(2) # 검색 유입 탭 로딩 대기
-                        
-                    
                     extracted = self.driver.execute_script(target_extractor)
                     results.append(extracted)
-                    
                 except Exception as e:
                     pass
             
