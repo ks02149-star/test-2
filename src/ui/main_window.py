@@ -50,7 +50,7 @@ class MainWindow(FluentWindow):
         self.addSubInterface(self.scraper_interface, FluentIcon.DOCUMENT, '블로그 순위 체크')
         self.addSubInterface(self.place_scraper_interface, getattr(FluentIcon, "POI", FluentIcon.SEARCH), '플레이스 순위 체크')
         self.addSubInterface(self.company_list_interface, FluentIcon.PEOPLE, '업체 리스트')
-        self.addSubInterface(self.index_check_interface, getattr(FluentIcon, "PIE_SINGLE", FluentIcon.DOCUMENT), '지수 체크')
+        self.addSubInterface(self.index_check_interface, getattr(FluentIcon, "PIE_SINGLE", FluentIcon.DOCUMENT), '블로그 통계 대시보드')
         self.addSubInterface(self.spell_check_interface, FluentIcon.EDIT, '맞춤법 검사기')
         self.addSubInterface(self.settings_interface, FluentIcon.SETTING, '설정', position=NavigationItemPosition.BOTTOM)
         

@@ -752,12 +752,16 @@ class StatsScraperWorker(QThread):
                 'referer': """
                     let inflow = [];
                     // 신규 UI 테이블 파싱
-                    let rows = document.querySelectorAll('div[class*="u_ni_table_component"] table tbody tr');
-                    if (rows.length > 0) {
+                    let tables = document.querySelectorAll('div[class*="u_ni_table_component"] table');
+                    if (tables.length > 0) {
+                        let targetTable = tables.length > 1 ? tables[1] : tables[0];
+                        let rows = targetTable.querySelectorAll('tbody tr');
                         for (let row of rows) {
                             let cells = Array.from(row.querySelectorAll('td')).map(e => e.innerText.trim());
                             if (cells.length >= 3) {
                                 let name = cells[1];
+                                let excludeNames = ['네이버 통합검색_모바일', '네이버 통합검색_PC', 'Daum 검색_모바일', 'Daum 검색_PC'];
+                                if (excludeNames.includes(name)) continue;
                                 let percent = parseFloat(cells[2].replace(/,/g, '').replace('%', '')) || 0;
                                 let count = 0;
                                 if (cells.length >= 4) {
@@ -773,7 +777,10 @@ class StatsScraperWorker(QThread):
                             let text = item.innerText;
                             let m = text.match(/(.+?)\\s+([\\d.]+)%/);
                             if (m) {
-                                inflow.push({ name: m[1].trim(), percent: parseFloat(m[2]), value: 0 });
+                                let name = m[1].trim();
+                                let excludeNames = ['네이버 통합검색_모바일', '네이버 통합검색_PC', 'Daum 검색_모바일', 'Daum 검색_PC'];
+                                if (excludeNames.includes(name)) continue;
+                                inflow.push({ name: name, percent: parseFloat(m[2]), value: 0 });
                             }
                         }
                     }

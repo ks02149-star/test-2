@@ -123,7 +123,7 @@ class HomeInterface(ScrollArea):
         self.scraper_card = FeatureCard(FluentIcon.DOCUMENT, "블로그 순위 체크", "키워드별 블로그 순위 탐색")
         self.place_card = FeatureCard(getattr(FluentIcon, "POI", FluentIcon.SEARCH), "플레이스 순위 체크", "키워드별 플레이스 순위 탐색")
         self.company_card = FeatureCard(FluentIcon.PEOPLE, "업체 리스트", "업체별 링크 관리, 휴진 체크")
-        self.index_card = FeatureCard(getattr(FluentIcon, "PIE_SINGLE", FluentIcon.DOCUMENT), "지수 체크(개발중)", "블로그 지수 분석 및 확인")
+        self.index_card = FeatureCard(getattr(FluentIcon, "PIE_SINGLE", FluentIcon.DOCUMENT), "블로그 통계 대시보드", "블로그 지수 분석 및 확인")
         self.spell_card = FeatureCard(FluentIcon.EDIT, "맞춤법 검사기", "맞춤법 검사기")
         
         self.schedule_card = MonthlyScheduleSummaryCard(self.main_window)

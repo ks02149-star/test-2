@@ -25,7 +25,7 @@ from qfluentwidgets import (PushButton, PrimaryPushButton, ComboBox, SpinBox, Sw
 from qfluentwidgets.common.icon import drawIcon
 from src.core.scraper_threads import StatsScraperWorker
 from src.config import SESSION, WORKSPACE_DIR, ASSETS_DIR, DATA_DIR, FONT_DIR, SETTINGS_PATH, CREDENTIALS_PATH
-from src.utils.helpers import safe_json_load
+from src.utils.helpers import safe_json_load, safe_json_save
 
 class IndexCheckInterface(QWidget):
     def __init__(self, parent=None):
@@ -42,7 +42,7 @@ class IndexCheckInterface(QWidget):
         layout.setSpacing(20)
         
         # Title
-        title_label = TitleLabel("지수 체크 (블로그 통계 대시보드)", self)
+        title_label = TitleLabel("블로그 통계 대시보드", self)
         layout.addWidget(title_label)
         
         # Top Control Bar
@@ -62,10 +62,24 @@ class IndexCheckInterface(QWidget):
         self.company_combo.currentIndexChanged.connect(self.on_company_changed)
         control_layout.addWidget(self.company_combo)
         
+        self.month_lbl = QLabel("조회 월:", control_card)
+        self.month_lbl.setFont(QFont("SUIT", 10, QFont.Bold))
+        self.month_lbl.setStyleSheet(f"color: {'#FFFFFF' if is_dark else '#000000'}; background: transparent;")
+        control_layout.addWidget(self.month_lbl)
+        
+        self.month_combo = ComboBox(control_card)
+        self.month_combo.setMinimumWidth(120)
+        self.month_combo.currentIndexChanged.connect(self.on_month_changed)
+        control_layout.addWidget(self.month_combo)
+        
         self.update_btn = PushButton("통계 데이터 갱신", control_card)
         self.update_btn.setMinimumWidth(150)
         self.update_btn.clicked.connect(self.update_stats)
         control_layout.addWidget(self.update_btn)
+        
+        self.export_btn = PushButton("이미지 내보내기", control_card)
+        self.export_btn.clicked.connect(self.export_image)
+        control_layout.addWidget(self.export_btn)
         
         self.loading_ring = IndeterminateProgressRing(control_card)
         self.loading_ring.setFixedSize(24, 24)
@@ -134,6 +148,10 @@ class IndexCheckInterface(QWidget):
         
     def on_company_changed(self, index):
         if index < 0 or index >= len(self.companies):
+            self.current_stats_data = {}
+            self.month_combo.blockSignals(True)
+            self.month_combo.clear()
+            self.month_combo.blockSignals(False)
             self.clear_chart()
             self.time_label.setText("업체 정보가 없습니다.")
             return
@@ -144,11 +162,48 @@ class IndexCheckInterface(QWidget):
         # Load local stats JSON file
         stats_path = os.path.join(self.base_dir, "Data", f"stats_{company_name}.json")
         stats_data = safe_json_load(stats_path, default=None)
+        
         if stats_data:
+            # Migration logic if missing 'history'
+            if 'history' not in stats_data:
+                old_data = stats_data.copy()
+                stats_data = {'history': {}, 'last_updated': old_data.get('last_updated', '')}
+                if 'dates' in old_data and old_data['dates']:
+                    stats_data['history'][old_data['dates'][-1]] = old_data
+                    
+            self.current_stats_data = stats_data
             self.time_label.setText(f"최근 업데이트: {stats_data.get('last_updated', '알 수 없음')}")
-            self.render_stats(stats_data)
+            
+            self.month_combo.blockSignals(True)
+            self.month_combo.clear()
+            history = stats_data.get('history', {})
+            months = sorted(history.keys())
+            for m in months:
+                self.month_combo.addItem(m)
+            if months:
+                self.month_combo.setCurrentIndex(len(months) - 1)
+            self.month_combo.blockSignals(False)
+            self.on_month_changed(self.month_combo.currentIndex())
         else:
+            self.current_stats_data = {}
+            self.month_combo.blockSignals(True)
+            self.month_combo.clear()
+            self.month_combo.blockSignals(False)
             self.time_label.setText("통계 데이터가 없거나 업데이트를 진행해 주세요.")
+            self.clear_chart()
+            
+    def on_month_changed(self, index):
+        if index < 0 or not hasattr(self, 'current_stats_data'):
+            self.clear_chart()
+            return
+            
+        month = self.month_combo.itemText(index)
+        history = self.current_stats_data.get('history', {})
+        target_stats = history.get(month, {})
+        
+        if target_stats:
+            self.render_stats(target_stats)
+        else:
             self.clear_chart()
             
     def render_stats(self, stats_data):
@@ -158,6 +213,15 @@ class IndexCheckInterface(QWidget):
         views = stats_data.get('views', [])
         avg_time = stats_data.get('avg_time', {'my': 0, 'total': 0, 'top': 0, 'max': 0})
         inflow = stats_data.get('inflow', [])
+        
+        # '기타' 항목이 있다면 리스트의 가장 마지막으로 이동
+        others = None
+        for i, item in enumerate(inflow):
+            if item.get('name') == '기타':
+                others = inflow.pop(i)
+                break
+        if others:
+            inflow.append(others)
         rank_posts = stats_data.get('rank_posts', [])
         visit_table = stats_data.get('visit_table', [])
         
@@ -190,6 +254,8 @@ class IndexCheckInterface(QWidget):
         # UI update to loading state
         self.company_combo.setEnabled(False)
         self.update_btn.setEnabled(False)
+        self.month_combo.setEnabled(False)
+        self.export_btn.setEnabled(False)
         self.loading_ring.show()
         self.loading_ring.start()
         self.status_label.setText("크롬 드라이버 준비 중...")
@@ -206,16 +272,49 @@ class IndexCheckInterface(QWidget):
     def on_worker_finished(self, stats_data):
         self.company_combo.setEnabled(True)
         self.update_btn.setEnabled(True)
+        self.month_combo.setEnabled(True)
+        self.export_btn.setEnabled(True)
         self.loading_ring.stop()
         self.loading_ring.hide()
         self.status_label.setText("데이터 업데이트 성공!")
-        self.time_label.setText(f"최근 업데이트: {stats_data.get('last_updated', '')}")
-        self.render_stats(stats_data)
-        InfoBar.success("성공", f"'{self.company_combo.currentText()}' 블로그 통계 수집이 완료되었습니다.", duration=3000, parent=self)
+        
+        company_name = self.company_combo.currentText()
+        stats_path = os.path.join(self.base_dir, "Data", f"stats_{company_name}.json")
+        existing_data = safe_json_load(stats_path, default={'history': {}})
+        
+        if 'history' not in existing_data:
+            old_data = existing_data.copy()
+            existing_data = {'history': {}}
+            if 'dates' in old_data and old_data['dates']:
+                existing_data['history'][old_data['dates'][-1]] = old_data
+                
+        dates = stats_data.get('dates', [])
+        if dates:
+            target_month = dates[-1]
+            existing_data['history'][target_month] = stats_data
+            existing_data['last_updated'] = stats_data.get('last_updated', '')
+            safe_json_save(stats_path, existing_data)
+            self.current_stats_data = existing_data
+            
+            self.month_combo.blockSignals(True)
+            self.month_combo.clear()
+            history = existing_data.get('history', {})
+            months = sorted(history.keys())
+            for m in months:
+                self.month_combo.addItem(m)
+            if months:
+                self.month_combo.setCurrentIndex(len(months) - 1)
+            self.month_combo.blockSignals(False)
+            self.on_month_changed(self.month_combo.currentIndex())
+            
+        self.time_label.setText(f"최근 업데이트: {existing_data.get('last_updated', '')}")
+        InfoBar.success("성공", f"'{company_name}' 블로그 통계 수집이 완료되었습니다.", duration=3000, parent=self)
         
     def on_worker_error(self, err_msg):
         self.company_combo.setEnabled(True)
         self.update_btn.setEnabled(True)
+        self.month_combo.setEnabled(True)
+        self.export_btn.setEnabled(True)
         self.loading_ring.stop()
         self.loading_ring.hide()
         self.status_label.setText("실패")
@@ -292,6 +391,51 @@ class IndexCheckInterface(QWidget):
                 
                 /* Title ellipsis */
                 .ellipsis {{ white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 250px; display: inline-block; vertical-align: bottom; }}
+                
+                /* Export Mode - fits everything into 1000x560 using 2-column Grid */
+                body.export-mode {{ overflow: hidden; border-radius: 0 !important; }}
+                body.export-mode .dashboard {{ 
+                    display: grid; 
+                    grid-template-columns: 55fr 45fr; 
+                    grid-template-rows: 80px 1fr auto; 
+                    gap: 15px; 
+                    height: 100vh; 
+                    padding: 15px; 
+                    box-sizing: border-box; 
+                }}
+                body.export-mode .dashboard > div {{ margin-bottom: 0; }}
+                body.export-mode .summary-cards {{ grid-column: 1; grid-row: 1; height: 100%; }}
+                body.export-mode .chart-container {{ grid-column: 1; grid-row: 2; height: 100%; }}
+                body.export-mode .dashboard > .table-box {{ grid-column: 1; grid-row: 3; height: auto; }}
+                body.export-mode .tables-container {{ grid-column: 2; grid-row: 1 / 4; display: flex; flex-direction: column; gap: 15px; min-height: 0; }}
+                body.export-mode .tables-container > .table-box {{ flex: 1; margin-right: 0; display: flex; flex-direction: column; }}
+                
+                body.export-mode .card {{ padding: 12px 20px; }}
+                body.export-mode .card-title {{ font-size: 12px; }}
+                body.export-mode .card-value {{ font-size: 24px; margin-top: 4px; }}
+                body.export-mode .table-box {{ padding: 12px 16px; }}
+                body.export-mode .table-box h3 {{ margin-bottom: 8px; font-size: 13px; }}
+                body.export-mode th, body.export-mode td {{ padding: 4px 6px; font-size: 11px; font-weight: 600; }}
+                
+                body.export-mode #val-time-inner {{ width: 100% !important; margin: 0px 0 0 0 !important; }}
+                body.export-mode #val-time-inner .val-bar {{ top: 20px !important; }}
+                body.export-mode #val-time-inner .val-circle {{ top: 28px !important; }}
+                body.export-mode #val-time-inner .val-zero-text,
+                body.export-mode #val-time-inner .val-my-text,
+                body.export-mode #val-time-inner .val-max-text {{ top: -2px !important; }}
+                body.export-mode #val-time-inner .val-bar-line {{ top: 10px !important; height: 30px !important; }}
+                
+                .label-export {{ display: none; }}
+                body.export-mode .label-normal {{ display: none !important; }}
+                body.export-mode .label-export {{ display: block !important; position: absolute; font-size: 12px; white-space: nowrap; font-weight: bold; top: -2px !important; }}
+                
+                .label-export-topright {{ display: none; }}
+                body.export-mode .label-export-topright {{ display: block !important; position: absolute; right: 20px; top: 12px; font-size: 12px; font-weight: bold; color: #5C80F8; }}
+                
+                body.export-mode .tables-container > .table-box:first-child {{ margin-bottom: 15px; }}
+                
+                body.export-mode #tbody-inflow tr:nth-child(n+8) {{ display: none; }}
+                body.export-mode #tbody-rank tr:nth-child(n+8) {{ display: none; }}
             </style>
         </head>
         <body>
@@ -301,8 +445,9 @@ class IndexCheckInterface(QWidget):
                         <div class="card-title">최근 조회수 (마지막 월 기준)</div>
                         <div class="card-value" id="val-views">0</div>
                     </div>
-                    <div class="card" style="flex: 2;">
+                    <div class="card" style="flex: 2; position: relative;">
                         <div class="card-title">게시글 평균사용시간 (최근 월 기준)</div>
+                        <div id="top-group-export-label" class="label-export-topright"></div>
                         <div id="val-time-container"></div>
                     </div>
                 </div>
@@ -317,7 +462,7 @@ class IndexCheckInterface(QWidget):
                 </div>
                 <div class="tables-container">
                     <div class="table-box">
-                        <h3>검색 유입 분석 TOP 10</h3>
+                        <h3 id="inflow-title">검색 유입 분석 TOP 10</h3>
                         <div class="table-wrapper">
                             <table>
                                 <thead><tr><th>순위</th><th>유입 경로 / 키워드</th><th>비율(%)</th><th>조회수</th></tr></thead>
@@ -326,7 +471,7 @@ class IndexCheckInterface(QWidget):
                         </div>
                     </div>
                     <div class="table-box">
-                        <h3>게시물 조회수 순위 TOP 10</h3>
+                        <h3 id="rank-title">게시물 조회수 순위 TOP 10</h3>
                         <div class="table-wrapper">
                             <table>
                                 <thead><tr><th>순위</th><th>게시물 제목</th><th>조회수</th></tr></thead>
@@ -412,6 +557,12 @@ class IndexCheckInterface(QWidget):
                     let my = avg_time.my || 0;
                     let total = avg_time.total || 0;
                     let top = avg_time.top || 0;
+                    
+                    let exportLabel = document.getElementById('top-group-export-label');
+                    if (exportLabel) {{
+                        exportLabel.innerText = top > 0 ? `상위 그룹 평균 ${{top}}` : '';
+                    }}
+
                     let max = avg_time.max || 100;
                     if (max === 0) max = Math.max(my, total, top, 1);
                     
@@ -438,17 +589,39 @@ class IndexCheckInterface(QWidget):
                     let total_align = "center";
                     let top_transform = "translateX(-50%)";
                     let top_align = "center";
-
-                    if (Math.abs(total_pct - top_pct) < 15) {{
-                        if (total_pct <= top_pct) {{
-                            total_transform = "translateX(-100%)";
-                            total_align = "right";
-                            top_transform = "translateX(0%)";
+                    
+                    let overlap_th = 18;
+                    
+                    if (Math.abs(my_pct - top_pct) < overlap_th) {{
+                        if (my <= top) {{
+                            top_transform = "translateX(10px)";
                             top_align = "left";
                         }} else {{
-                            top_transform = "translateX(-100%)";
+                            top_transform = "translateX(calc(-100% - 10px))";
                             top_align = "right";
-                            total_transform = "translateX(0%)";
+                        }}
+                    }}
+                    
+                    if (Math.abs(my_pct - total_pct) < overlap_th) {{
+                        if (my <= total) {{
+                            total_transform = "translateX(10px)";
+                            total_align = "left";
+                        }} else {{
+                            total_transform = "translateX(calc(-100% - 10px))";
+                            total_align = "right";
+                        }}
+                    }}
+
+                    if (Math.abs(total_pct - top_pct) < overlap_th) {{
+                        if (total <= top) {{
+                            total_transform = "translateX(calc(-100% - 10px))";
+                            total_align = "right";
+                            top_transform = "translateX(10px)";
+                            top_align = "left";
+                        }} else {{
+                            top_transform = "translateX(calc(-100% - 10px))";
+                            top_align = "right";
+                            total_transform = "translateX(10px)";
                             total_align = "left";
                         }}
                     }}
@@ -465,16 +638,16 @@ class IndexCheckInterface(QWidget):
                     let top_height = 22;
                     
                     let html = `
-                    <div style="position: relative; width: calc(100% - 40px); margin: 16px 20px 0 20px; height: 60px; font-family: 'SUIT', sans-serif;">
+                    <div id="val-time-inner" style="position: relative; width: calc(100% - 40px); margin: 16px 20px 0 20px; height: 60px; font-family: 'SUIT', sans-serif;">
                         
                         <!-- The Background Bar -->
-                        <div style="position: absolute; left: 0; right: 0; top: ${{barTop}}px; height: 16px; background: ${{barBg}}; z-index: 1;"></div>
+                        <div class="val-bar" style="position: absolute; left: 0; right: 0; top: ${{barTop}}px; height: 16px; background: ${{barBg}}; z-index: 1;"></div>
                         
                         ${{is_broken ? `
                         <!-- Broken Axis Darker Part -->
-                        <div style="position: absolute; left: ${{broken_threshold}}%; right: 0; top: ${{barTop}}px; height: 16px; background: ${{darkBarBg}}; z-index: 2;"></div>
+                        <div class="val-bar" style="position: absolute; left: ${{broken_threshold}}%; right: 0; top: ${{barTop}}px; height: 16px; background: ${{darkBarBg}}; z-index: 2;"></div>
                         <!-- The Wave -->
-                        <div style="position: absolute; left: ${{broken_threshold}}%; top: ${{barTop}}px; width: 10px; height: 16px; z-index: 3; transform: translateX(-50%);">
+                        <div class="val-bar" style="position: absolute; left: ${{broken_threshold}}%; top: ${{barTop}}px; width: 10px; height: 16px; z-index: 3; transform: translateX(-50%);">
                             <svg width="10" height="16" viewBox="0 0 10 16">
                                 <path d="M5 0 Q10 2 5 4 T5 8 Q10 10 5 12 T5 16" stroke="${{cardBg}}" stroke-width="3" fill="none"/>
                             </svg>
@@ -482,32 +655,35 @@ class IndexCheckInterface(QWidget):
                         ` : ''}}
                         
                         <!-- The Green Bar (0 to My Pct) -->
-                        <div style="position: absolute; left: 0; width: ${{my_pct}}%; top: ${{barTop}}px; height: 16px; background: #00C73C; z-index: 4;"></div>
+                        <div class="val-bar" style="position: absolute; left: 0; width: ${{my_pct}}%; top: ${{barTop}}px; height: 16px; background: #00C73C; z-index: 4;"></div>
                         
                         <!-- The Circle -->
-                        <div style="position: absolute; left: ${{my_pct}}%; top: ${{circleTop}}px; transform: translate(-50%, -50%); width: 14px; height: 14px; border-radius: 50%; background: #FFF; border: 3px solid #00C73C; z-index: 5;"></div>
+                        <div class="val-circle" style="position: absolute; left: ${{my_pct}}%; top: ${{circleTop}}px; transform: translate(-50%, -50%); width: 14px; height: 14px; border-radius: 50%; background: #FFF; border: 3px solid #00C73C; z-index: 5;"></div>
                         
                         <!-- 0 Text (Only if circle is far enough) -->
-                        ${{my_pct > 8 ? `<div style="position: absolute; left: 0; top: ${{textTop}}px; font-size: 11px; color: ${{textCol}}; opacity: 0.6; transform: translateX(-50%);">0</div>` : ''}}
+                        ${{my_pct > 8 ? `<div class="val-zero-text" style="position: absolute; left: 0; top: ${{textTop}}px; font-size: 11px; color: ${{textCol}}; opacity: 0.6; transform: translateX(-50%);">0</div>` : ''}}
                         
                         <!-- My Value Text under circle -->
-                        <div style="position: absolute; left: ${{my_pct}}%; top: ${{textTop}}px; font-size: 12px; color: #00C73C; font-weight: bold; transform: translateX(-50%); z-index: 6;">${{my}}</div>
+                        <div class="val-my-text" style="position: absolute; left: ${{my_pct}}%; top: ${{textTop}}px; font-size: 12px; color: #00C73C; font-weight: bold; transform: translateX(-50%); z-index: 6;">${{my}}</div>
                         
                         <!-- Max Text -->
-                        <div style="position: absolute; right: 0; top: ${{textTop}}px; font-size: 11px; color: ${{textCol}}; opacity: 0.6; transform: translateX(50%);">${{max.toLocaleString()}}</div>
+                        <div class="val-max-text" style="position: absolute; right: 0; top: ${{textTop}}px; font-size: 11px; color: ${{textCol}}; opacity: 0.6; transform: translateX(50%);">${{max.toLocaleString()}}</div>
                         
                         <!-- Service Total Line & Text -->
                         ${{total > 0 ? `
-                        <div style="position: absolute; left: ${{total_pct}}%; top: ${{barTop}}px; height: ${{total_height}}px; width: 1px; border-left: 1px dotted ${{textCol}}; opacity: 0.5; z-index: 4;"></div>
-                        <div style="position: absolute; left: ${{total_pct}}%; top: ${{textTotalTop}}px; transform: ${{total_transform}}; text-align: ${{total_align}}; font-size: 10px; color: ${{textCol}}; opacity: 0.7; white-space: nowrap; line-height: 1.2; padding: 0 4px;">
+                        <div class="val-bar-line" style="position: absolute; left: ${{total_pct}}%; top: ${{barTop}}px; height: ${{total_height}}px; width: 1px; border-left: 1px dotted ${{textCol}}; opacity: 0.5; z-index: 4;"></div>
+                        
+                        <div class="val-label label-normal" style="position: absolute; left: ${{total_pct}}%; top: ${{textTotalTop}}px; transform: ${{total_transform}}; text-align: ${{total_align}}; font-size: 10px; color: ${{textCol}}; opacity: 0.7; white-space: nowrap; line-height: 1.2; padding: 0 4px;">
                             <span style="font-size: 12px; font-weight: bold;">${{total}}</span><br>서비스 전체 평균
                         </div>
+                        <div class="label-export" style="left: ${{total_pct}}%; transform: ${{total_transform}}; text-align: ${{total_align}}; color: ${{textCol}}; opacity: 0.8;">서비스 전체 평균 ${{total}}</div>
                         ` : ''}}
                         
                         <!-- Top Group Line & Text -->
                         ${{top > 0 ? `
-                        <div style="position: absolute; left: ${{top_pct}}%; top: ${{barTop}}px; height: ${{top_height}}px; width: 1px; border-left: 1px dotted #5C80F8; z-index: 4;"></div>
-                        <div style="position: absolute; left: ${{top_pct}}%; top: ${{textTopTop}}px; transform: ${{top_transform}}; text-align: ${{top_align}}; font-size: 10px; color: #5C80F8; white-space: nowrap; line-height: 1.2; padding: 0 4px;">
+                        <div class="val-bar-line" style="position: absolute; left: ${{top_pct}}%; top: ${{barTop}}px; height: ${{top_height}}px; width: 1px; border-left: 1px dotted #5C80F8; z-index: 4;"></div>
+                        
+                        <div class="val-label label-normal" style="position: absolute; left: ${{top_pct}}%; top: ${{textTopTop}}px; transform: ${{top_transform}}; text-align: ${{top_align}}; font-size: 10px; color: #5C80F8; white-space: nowrap; line-height: 1.2; padding: 0 4px;">
                             <span style="font-size: 12px; font-weight: bold;">${{top}}</span><br>상위 그룹 평균
                         </div>
                         ` : ''}}
@@ -605,4 +781,54 @@ class IndexCheckInterface(QWidget):
         
         if hasattr(self, 'combo_lbl'):
             self.combo_lbl.setStyleSheet(f"color: {text_color}; background: transparent;")
+            
+        if hasattr(self, 'month_lbl'):
+            self.month_lbl.setStyleSheet(f"color: {text_color}; background: transparent;")
 
+    def export_image(self):
+        if not hasattr(self, 'chart_view'): return
+        company_name = self.company_combo.currentText()
+        default_name = f"{company_name}_통계.png"
+        
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "통계 이미지 저장",
+            os.path.join(os.path.expanduser("~"), "Desktop", default_name),
+            "Images (*.png)"
+        )
+        
+        if not file_path:
+            return
+            
+        old_size_policy = self.chart_view.sizePolicy()
+        old_min_size = self.chart_view.minimumSize()
+        old_max_size = self.chart_view.maximumSize()
+        
+        is_dark = isDarkTheme()
+        theme_str = 'dark' if is_dark else 'light'
+        bg_color = '#202020' if is_dark else '#F3F3F3'
+        card_bg = '#2C2C2C' if is_dark else '#FFFFFF'
+        border_color = '#3A3A3A' if is_dark else '#E5E5E5'
+        text_color = '#FFFFFF' if is_dark else '#000000'
+        
+        js_light = f"document.body.classList.add('export-mode'); updateTheme('light', '#FFFFFF', '#FFFFFF', '#E5E5E5', '#000000'); document.getElementById('inflow-title').innerText = '검색 유입 분석'; document.getElementById('rank-title').innerText = '게시물 조회수 순위'; mainOption.tooltip.show = false; mainOption.xAxis[0].axisLabel.interval = 0; mainOption.xAxis[0].axisLabel.fontSize = 9; mainChart.setOption(mainOption); mainChart.dispatchAction({{type: 'hideTip'}});"
+        self.chart_view.page().runJavaScript(js_light)
+        
+        self.chart_view.setFixedSize(1000, 560)
+        self.chart_view.page().runJavaScript("mainChart.resize();")
+        
+        QTimer.singleShot(600, lambda: self._do_capture(file_path, old_min_size, old_max_size, old_size_policy, theme_str, bg_color, card_bg, border_color, text_color))
+
+    def _do_capture(self, file_path, old_min_size, old_max_size, old_size_policy, theme_str, bg_color, card_bg, border_color, text_color):
+        pixmap = self.chart_view.grab()
+        pixmap.save(file_path, "PNG")
+        
+        self.chart_view.setMinimumSize(old_min_size)
+        self.chart_view.setMaximumSize(old_max_size)
+        self.chart_view.setSizePolicy(old_size_policy)
+        
+        js_restore = f"document.body.classList.remove('export-mode'); updateTheme('{theme_str}', '{bg_color}', '{card_bg}', '{border_color}', '{text_color}'); document.getElementById('inflow-title').innerText = '검색 유입 분석 TOP 10'; document.getElementById('rank-title').innerText = '게시물 조회수 순위 TOP 10'; mainOption.tooltip.show = true; mainOption.xAxis[0].axisLabel.interval = 'auto'; mainOption.xAxis[0].axisLabel.fontSize = 12; mainChart.setOption(mainOption);"
+        self.chart_view.page().runJavaScript(js_restore)
+        self.chart_view.page().runJavaScript("mainChart.resize();")
+        
+        InfoBar.success("저장 완료", f"이미지가 {file_path}에 저장되었습니다.", duration=3000, parent=self)
