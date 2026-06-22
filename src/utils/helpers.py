@@ -198,11 +198,16 @@ def install_required_packages():
     if os.name == 'nt':
         packages["pywin32"] = "win32api"
         
+    installed_any = False
     for pip_name, import_name in packages.items():
         try:
             __import__(import_name)
         except ImportError:
             subprocess.check_call([sys.executable, "-m", "pip", "install", pip_name])
+            installed_any = True
+            
+    if installed_any:
+        os.execv(sys.executable, [sys.executable] + sys.argv)
 
 install_required_packages()
 

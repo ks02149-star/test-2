@@ -43,6 +43,9 @@ def main():
         "--collect-all", "qfluentwidgets",
         "--collect-all", "selenium",
         "--collect-all", "webdriver_manager",
+        "--collect-all", "PyQt5.QtWebEngine",
+        "--collect-all", "PyQt5.QtWebEngineCore",
+        "--collect-all", "PyQt5.QtWebEngineWidgets",
         "--exclude-module", "matplotlib",
         "--exclude-module", "IPython",
         "--exclude-module", "scipy",
@@ -55,6 +58,8 @@ def main():
         "--exclude-module", "PyQt6",
         "--exclude-module", "PySide6",
         "--hidden-import", "PyQt5.QtWebEngineWidgets",
+        "--hidden-import", "PyQt5.QtWebEngineCore",
+        "--hidden-import", "PyQt5.QtWebEngine",
         "--hidden-import", "pandas",
         "--hidden-import", "pandas._libs.tslibs.strptime",
         "--hidden-import", "openpyxl",
@@ -82,6 +87,21 @@ def main():
         shutil.copy2("credentials.json", os.path.join(workspace_dir, "credentials.json"))
     if os.path.exists("키워드_순위_작업표.xlsx"):
         shutil.copy2("키워드_순위_작업표.xlsx", os.path.join(target_dir, "키워드_순위_작업표.xlsx"))
+        
+    # [CRITICAL FIX] PyQtWebEngine icudtl.dat   ( 丮     )
+    resources_dir = os.path.join(target_dir, "_internal", "PyQt5", "Qt5", "resources")
+    if os.path.exists(resources_dir):
+        for item in os.listdir(resources_dir):
+            src_path = os.path.join(resources_dir, item)
+            dst_path = os.path.join(target_dir, item)
+            if os.path.isfile(src_path):
+                shutil.copy2(src_path, dst_path)
+                
+    locales_dir = os.path.join(target_dir, "_internal", "PyQt5", "Qt5", "translations", "qtwebengine_locales")
+    if os.path.exists(locales_dir):
+        dst_locales = os.path.join(target_dir, "qtwebengine_locales")
+        if not os.path.exists(dst_locales):
+            shutil.copytree(locales_dir, dst_locales)
 
     print("\n========================================================")
     print("빌드가 성공적으로 완료되었습니다!")

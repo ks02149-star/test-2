@@ -2,7 +2,10 @@ from src.utils.helpers import load_companies
 
 try:
     from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEnginePage, QWebEngineProfile
-except ImportError:
+except ImportError as e:
+    import traceback
+    with open("webengine_import_error.log", "w", encoding="utf-8") as f:
+        f.write(traceback.format_exc())
     QWebEngineView = None
     QWebEnginePage = None
     QWebEngineProfile = None
@@ -101,7 +104,7 @@ class IndexCheckInterface(QWidget):
         layout.addWidget(control_card)
         
         if QWebEngineView is None:
-            error_lbl = SubtitleLabel("PyQtWebEngine 모듈이 설치되지 않아 차트를 렌더링할 수 없습니다.\n앱을 재시작하면 자동으로 설치됩니다.", self)
+            error_lbl = SubtitleLabel("PyQtWebEngine 모듈을 로드할 수 없어 차트를 렌더링할 수 없습니다.\n문제가 지속될 경우 관리자에게 문의하세요.", self)
             layout.addWidget(error_lbl)
             layout.addStretch(1)
             return

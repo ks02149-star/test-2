@@ -42,8 +42,27 @@ def main():
     except AttributeError:
         pass 
         
+    if getattr(sys, 'frozen', False):
+        os.environ["QTWEBENGINE_DISABLE_SANDBOX"] = "1"
+        if hasattr(sys, '_MEIPASS'):
+            # QtWebEngineProcess.exe path
+            process_path = os.path.join(sys._MEIPASS, "PyQt5", "Qt5", "bin", "QtWebEngineProcess.exe")
+            if os.path.exists(process_path):
+                os.environ["QTWEBENGINEPROCESS_PATH"] = process_path
+            
+            # Resources (icudtl.dat, qtwebengine_resources.pak) path
+            resources_path = os.path.join(sys._MEIPASS, "PyQt5", "Qt5", "resources")
+            if os.path.exists(resources_path):
+                os.environ["QTWEBENGINE_DATAPATH"] = resources_path
+                
+            # Locales path
+            locales_path = os.path.join(sys._MEIPASS, "PyQt5", "Qt5", "translations", "qtwebengine_locales")
+            if os.path.exists(locales_path):
+                os.environ["QTWEBENGINE_LOCALES_PATH"] = locales_path
+                
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps)
+    QApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
 
     app = QApplication(sys.argv)
     app.aboutToQuit.connect(cleanup_before_exit)
