@@ -19,6 +19,54 @@ from qfluentwidgets import (PushButton, PrimaryPushButton, ComboBox, SpinBox, Sw
 from qfluentwidgets.common.icon import drawIcon
 from src.config import SESSION, WORKSPACE_DIR, ASSETS_DIR, DATA_DIR, FONT_DIR, SETTINGS_PATH, CREDENTIALS_PATH
 
+class MarqueeLabel(QWidget):
+    def __init__(self, text, text_color, parent=None):
+        super().__init__(parent)
+        self.lbl = BodyLabel(text, self)
+        self.lbl.setStyleSheet(f"color: {text_color}; font-size: 11px; font-weight: bold; background: transparent; border: none;")
+        self.lbl.adjustSize()
+        self.offset = 0
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.update_offset)
+        self.is_hovered = False
+
+    def sizeHint(self):
+        return self.lbl.sizeHint()
+
+    def minimumSizeHint(self):
+        return self.lbl.minimumSizeHint()
+
+    def enterEvent(self, event):
+        self.is_hovered = True
+        if self.lbl.width() > self.width():
+            self.timer.start(30)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self.is_hovered = False
+        self.timer.stop()
+        self.offset = 0
+        y = (self.height() - self.lbl.height()) // 2
+        self.lbl.move(0, y)
+        super().leaveEvent(event)
+
+    def update_offset(self):
+        if self.lbl.width() > self.width():
+            self.offset += 1
+            if self.offset > self.lbl.width() + 10:
+                self.offset = -self.width()
+            y = (self.height() - self.lbl.height()) // 2
+            self.lbl.move(-self.offset, y)
+
+    def resizeEvent(self, event):
+        y = (self.height() - self.lbl.height()) // 2
+        if not self.is_hovered:
+            self.lbl.move(0, y)
+        else:
+            self.lbl.move(-self.offset, y)
+        super().resizeEvent(event)
+
+
 class CompanyCard(QFrame):
     def __init__(self, company_data, on_edit, on_delete, parent=None):
         super().__init__(parent)
@@ -789,8 +837,8 @@ class ScheduleItemWidget(QFrame):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(6, 1, 6, 1)
         
-        self.lbl = BodyLabel(text)
-        self.lbl.setStyleSheet(f"color: {text_color}; font-size: 11px; font-weight: bold; background: transparent; border: none;")
+        self.lbl = MarqueeLabel(text, text_color, self)
+        self.lbl.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         layout.addWidget(self.lbl)
         
     def contextMenuEvent(self, event):

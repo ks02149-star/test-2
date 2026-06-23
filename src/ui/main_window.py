@@ -13,8 +13,8 @@ import json
 import time
 import datetime
 from datetime import date
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject, QUrl, QDate, QPropertyAnimation, QEasingCurve, QRect, QPoint, QMargins, QTimer
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QMessageBox, QDialog, QFrame, QLabel, QStackedWidget, QGraphicsDropShadowEffect, QCalendarWidget, QPushButton, QFileDialog, QSizePolicy, QGridLayout
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject, QUrl, QDate, QPropertyAnimation, QEasingCurve, QRect, QPoint, QMargins, QTimer, QEvent
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QMessageBox, QDialog, QFrame, QLabel, QStackedWidget, QGraphicsDropShadowEffect, QCalendarWidget, QPushButton, QFileDialog, QSizePolicy, QGridLayout, QGraphicsOpacityEffect
 from PyQt5.QtGui import QFont, QFontDatabase, QDesktopServices, QTextCharFormat, QColor, QBrush, QPainter, QCursor, QPixmap
 from qfluentwidgets import (PushButton, PrimaryPushButton, ComboBox, SpinBox, SwitchButton, TextEdit, 
                             setTheme, Theme, TitleLabel, SubtitleLabel, InfoBar, InfoBarPosition,
@@ -47,9 +47,9 @@ class MainWindow(FluentWindow):
         
         self.addSubInterface(self.home_interface, FluentIcon.HOME, '홈')
         self.addSubInterface(self.schedule_interface, getattr(FluentIcon, "CALENDAR", FluentIcon.DATE_TIME), "월간 일정표")
+        self.addSubInterface(self.company_list_interface, FluentIcon.PEOPLE, '업체 리스트')
         self.addSubInterface(self.scraper_interface, FluentIcon.DOCUMENT, '블로그 순위 체크')
         self.addSubInterface(self.place_scraper_interface, getattr(FluentIcon, "POI", FluentIcon.SEARCH), '플레이스 순위 체크')
-        self.addSubInterface(self.company_list_interface, FluentIcon.PEOPLE, '업체 리스트')
         self.addSubInterface(self.index_check_interface, getattr(FluentIcon, "PIE_SINGLE", FluentIcon.DOCUMENT), '블로그 통계 대시보드')
         self.addSubInterface(self.spell_check_interface, FluentIcon.EDIT, '맞춤법 검사기')
         self.addSubInterface(self.settings_interface, FluentIcon.SETTING, '설정', position=NavigationItemPosition.BOTTOM)
@@ -58,6 +58,7 @@ class MainWindow(FluentWindow):
         qconfig.themeChanged.connect(self.update_theme_style)
         self.update_theme_style()
         
+
     def handle_logout(self):
         msg_box = MessageBox("로그아웃", "로그아웃 하시겠습니까?", self)
         if msg_box.exec_():
@@ -156,4 +157,6 @@ class MainWindow(FluentWindow):
             self.place_scraper_interface.worker.wait()
             
         event.accept()
+
+
 

@@ -374,20 +374,22 @@ class ScheduleAddDialog(QDialog):
         super().__init__(parent)
         self.date_str = date_str
         self.setWindowTitle(f"일정 추가 - {date_str}")
-        self.setFixedSize(400, 280)
+        self.setFixedSize(480, 310)
         
-        from qfluentwidgets import isDarkTheme, CalendarPicker
+        from qfluentwidgets import isDarkTheme, CalendarPicker, qconfig
         from PyQt5.QtCore import QDate
-        is_dark = isDarkTheme()
-        bg_color = "#2b2b2b" if is_dark else "#ffffff"
-        self.setStyleSheet(f"QDialog {{ background-color: {bg_color}; }}")
         
-        layout = QVBoxLayout(self)
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(24, 24, 24, 24)
+        self.layout.setSpacing(16)
         
-        self.title_label = SubtitleLabel("일정 추가")
-        layout.addWidget(self.title_label)
+        self.title_label = SubtitleLabel("새로운 일정", self)
+        self.layout.addWidget(self.title_label)
         
+        # 날짜 선택 영역
         date_layout = QHBoxLayout()
+        date_layout.setSpacing(12)
+        
         self.start_picker = CalendarPicker()
         self.end_picker = CalendarPicker()
         
@@ -396,8 +398,8 @@ class ScheduleAddDialog(QDialog):
         self.start_picker.setDate(initial_date)
         self.end_picker.setDate(initial_date)
         
-        start_lbl = BodyLabel("시작:")
-        end_lbl = BodyLabel("종료:")
+        start_lbl = BodyLabel("시작 일자")
+        end_lbl = BodyLabel("종료 일자")
         
         date_layout.addWidget(start_lbl)
         date_layout.addWidget(self.start_picker)
@@ -405,36 +407,66 @@ class ScheduleAddDialog(QDialog):
         date_layout.addWidget(end_lbl)
         date_layout.addWidget(self.end_picker)
         
-        layout.addLayout(date_layout)
+        self.layout.addLayout(date_layout)
         
+        # 일정 제목 입력
         self.input_edit = LineEdit()
-        self.input_edit.setPlaceholderText("예: OOO 미팅")
-        layout.addWidget(self.input_edit)
+        self.input_edit.setPlaceholderText("일정 제목을 입력하세요 (예: OOO 미팅)")
+        self.input_edit.setClearButtonEnabled(True)
+        self.layout.addWidget(self.input_edit)
         
+        # 체크박스 (유형 선택)
         check_layout = QHBoxLayout()
+        check_layout.setSpacing(12)
         self.chk_meeting = CheckBox("미팅")
+        self.chk_work = CheckBox("작업")
         self.chk_annual = CheckBox("연차")
         self.chk_am_half = CheckBox("오전반차")
         self.chk_pm_half = CheckBox("오후반차")
         
-        self.checkboxes = [self.chk_meeting, self.chk_annual, self.chk_am_half, self.chk_pm_half]
+        self.checkboxes = [self.chk_meeting, self.chk_work, self.chk_annual, self.chk_am_half, self.chk_pm_half]
         for chk in self.checkboxes:
             check_layout.addWidget(chk)
             chk.stateChanged.connect(self.on_checkbox_changed)
             
-        layout.addLayout(check_layout)
+        check_layout.addStretch(1)
+        self.layout.addLayout(check_layout)
         
+        self.layout.addStretch(1)
+        
+        # 버튼 영역
         btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(12)
+        btn_layout.addStretch(1)
+        
         self.save_btn = PrimaryPushButton("저장")
+        self.save_btn.setFixedWidth(100)
         self.cancel_btn = PushButton("취소")
+        self.cancel_btn.setFixedWidth(100)
         
         btn_layout.addWidget(self.save_btn)
         btn_layout.addWidget(self.cancel_btn)
-        layout.addLayout(btn_layout)
+        self.layout.addLayout(btn_layout)
         
         self.save_btn.clicked.connect(self.accept)
         self.cancel_btn.clicked.connect(self.reject)
         
+        self.update_style()
+        qconfig.themeChanged.connect(self.update_style)
+
+    def update_style(self):
+        from qfluentwidgets import isDarkTheme
+        is_dark = isDarkTheme()
+        bg_color = "#202020" if is_dark else "#FFFFFF"
+        text_color = "#FFFFFF" if is_dark else "#000000"
+        
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {bg_color};
+            }}
+        """)
+        self.title_label.setStyleSheet(f"color: {text_color}; background: transparent; font-weight: bold;")
+
     def on_checkbox_changed(self, state):
         if state == Qt.Checked:
             sender = self.sender()
@@ -476,6 +508,14 @@ class ScheduleAddDialog(QDialog):
             text = f"{prefix} {text}".strip()
             
         return start_str, end_str, text
+
+    def closeEvent(self, event):
+        from qfluentwidgets import qconfig
+        try:
+            qconfig.themeChanged.disconnect(self.update_style)
+        except Exception:
+            pass
+        super().closeEvent(event)
 
 
 class FavoriteEditDialog(QDialog):

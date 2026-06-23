@@ -72,6 +72,8 @@ class ScheduleInterface(ScrollArea):
         
         self.calendar_grid = QGridLayout()
         self.calendar_grid.setSpacing(1)
+        for i in range(7):
+            self.calendar_grid.setColumnStretch(i, 1)
         self.vBoxLayout.addLayout(self.calendar_grid)
         self.vBoxLayout.addStretch(1)
         
@@ -112,6 +114,8 @@ class ScheduleInterface(ScrollArea):
             date_str = f"{year}-{month:02d}-{d:02d}"
             
             cell_widget = QFrame()
+            cell_widget.setMinimumSize(130, 120)
+            cell_widget.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
             cell_widget.setFrameShape(QFrame.StyledPanel)
             cell_widget.setStyleSheet("QFrame { background-color: #2b2b2b; border: 1px solid #3c3c3c; border-radius: 4px; } QFrame:hover { background-color: #3b3b3b; }")
             
