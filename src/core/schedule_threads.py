@@ -60,8 +60,22 @@ class ScheduleFetchThread(QThread):
                 return
 
             sheets = res.json().get('sheets', [])
-            schedule_grid = sheets[0].get('data', [{}])[0].get('rowData', []) if len(sheets) > 0 else []
             
+            schedule_grid = []
+            holidays_grid = []
+            sort_grid = []
+            
+            for sheet in sheets:
+                title = sheet.get('properties', {}).get('title', '')
+                grid_data = sheet.get('data', [{}])[0].get('rowData', [])
+                if title == self.sheet_name:
+                    schedule_grid = grid_data
+                elif title == 'holidays':
+                    holidays_grid = grid_data
+                elif title == '정렬기준':
+                    sort_grid = grid_data
+                    
+
             parsed_data = []
             for row in schedule_grid:
                 if 'values' in row and len(row['values']) >= 2:
@@ -89,7 +103,7 @@ class ScheduleFetchThread(QThread):
                         creator_id = row['values'][2].get('formattedValue', '')
                     parsed_data.append([date_val, text_val, color_hex, creator_id])
             
-            holidays_grid = sheets[1].get('data', [{}])[0].get('rowData', []) if len(sheets) > 1 else []
+            parsed_holidays = {}
             parsed_holidays = {}
             import re
             for row in holidays_grid:
@@ -102,8 +116,7 @@ class ScheduleFetchThread(QThread):
                             parsed_holidays[match.group(1)] = text_val
                             
             sort_order = ['김현우', '공훈식', '김태훈', '장여진', '김정원', '김가현', '김태형', '이승희', '홍지민']
-            if len(sheets) > 2:
-                sort_grid = sheets[2].get('data', [{}])[0].get('rowData', [])
+            if sort_grid:
                 fetched_order = []
                 for row in sort_grid:
                     if 'values' in row and len(row['values']) > 0:

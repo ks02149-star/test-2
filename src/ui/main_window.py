@@ -3,6 +3,7 @@ from src.ui.interfaces.schedule_interface import ScheduleInterface
 from src.ui.interfaces.scraper_interface import ScraperInterface
 from src.ui.interfaces.place_scraper_interface import PlaceScraperInterface
 from src.ui.interfaces.company_list_interface import CompanyListInterface
+from src.ui.interfaces.holiday_check_interface import HolidayCheckInterface
 from src.ui.interfaces.index_check_interface import IndexCheckInterface
 from src.ui.interfaces.spell_check_interface import SpellCheckInterface
 from src.ui.interfaces.setting_interface import SettingInterface
@@ -41,6 +42,7 @@ class MainWindow(FluentWindow):
         self.scraper_interface = ScraperInterface(self)
         self.place_scraper_interface = PlaceScraperInterface(self)
         self.company_list_interface = CompanyListInterface(self)
+        self.holiday_check_interface = HolidayCheckInterface(self)
         self.index_check_interface = IndexCheckInterface(self)
         self.spell_check_interface = SpellCheckInterface(self)
         self.settings_interface = SettingInterface(self)
@@ -48,6 +50,7 @@ class MainWindow(FluentWindow):
         self.addSubInterface(self.home_interface, FluentIcon.HOME, '홈')
         self.addSubInterface(self.schedule_interface, getattr(FluentIcon, "CALENDAR", FluentIcon.DATE_TIME), "월간 일정표")
         self.addSubInterface(self.company_list_interface, FluentIcon.PEOPLE, '업체 리스트')
+        self.addSubInterface(self.holiday_check_interface, getattr(FluentIcon, "CHECKBOX", FluentIcon.ACCEPT), '업체별 휴진 체크')
         self.addSubInterface(self.scraper_interface, FluentIcon.DOCUMENT, '블로그 순위 체크')
         self.addSubInterface(self.place_scraper_interface, getattr(FluentIcon, "POI", FluentIcon.SEARCH), '플레이스 순위 체크')
         self.addSubInterface(self.index_check_interface, getattr(FluentIcon, "PIE_SINGLE", FluentIcon.DOCUMENT), '블로그 통계 대시보드')

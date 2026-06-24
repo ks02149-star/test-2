@@ -1002,3 +1002,94 @@ class FavoritePlaceCard(QFrame):
         except Exception:
             pass
         super().closeEvent(event)
+
+class CrossCheckListCard(QFrame):
+    clicked = pyqtSignal(dict)
+    
+    def __init__(self, company_data, cross_check_data, parent=None):
+        super().__init__(parent)
+        self.company_data = company_data
+        self.cross_check_data = cross_check_data
+        self.setObjectName("CrossCheckListCard")
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFixedHeight(70)
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(4)
+        
+        self.name_label = QLabel(company_data.get('name', ''), self)
+        self.name_label.setFont(QFont("SUIT", 12, QFont.Bold))
+        layout.addWidget(self.name_label)
+        
+        self.summary_label = QLabel(self)
+        self.summary_label.setFont(QFont("SUIT", 10))
+        layout.addWidget(self.summary_label)
+        
+        self.update_summary(cross_check_data)
+        self.is_selected = False
+        self.update_style()
+        try:
+            qconfig.themeChanged.connect(self.update_style)
+        except Exception:
+            pass
+        
+    def update_summary(self, cross_check_data):
+        self.cross_check_data = cross_check_data
+        if not cross_check_data or "users" not in cross_check_data:
+            self.summary_label.setText("기록 없음")
+            return
+            
+        summary_parts = []
+        for user, checks in cross_check_data["users"].items():
+            pc = checks.get("popup_check", "")
+            plc = checks.get("place_check", "")
+            if pc or plc:
+                part = f"{user}:"
+                if pc: part += f"팝({pc})"
+                if plc: part += f"플({plc})"
+                summary_parts.append(part)
+                
+        if summary_parts:
+            self.summary_label.setText(" | ".join(summary_parts))
+        else:
+            self.summary_label.setText("기록 없음")
+            
+    def mousePressEvent(self, event):
+        super().mousePressEvent(event)
+        self.clicked.emit(self.company_data)
+        
+    def set_selected(self, selected):
+        self.is_selected = selected
+        self.update_style()
+        
+    def update_style(self):
+        is_dark = isDarkTheme()
+        bg_color = "#2C2C2C" if is_dark else "#FFFFFF"
+        border_color = "#3A3A3A" if is_dark else "#E5E5E5"
+        hover_bg = "#383838" if is_dark else "#F9F9F9"
+        text_color = "#FFFFFF" if is_dark else "#000000"
+        
+        if getattr(self, 'is_selected', False):
+            bg_color = "#1E2D3D" if is_dark else "#CCE4F7"
+            border_color = "#0078D4"
+            
+        self.setStyleSheet(f"""
+            QFrame#CrossCheckListCard {{
+                background-color: {bg_color};
+                border: 1px solid {border_color};
+                border-radius: 8px;
+            }}
+            QFrame#CrossCheckListCard:hover {{
+                background-color: {hover_bg};
+            }}
+        """)
+        self.name_label.setStyleSheet(f"background: transparent; color: {text_color};")
+        self.summary_label.setStyleSheet("background: transparent; color: #888888;")
+        
+    def closeEvent(self, event):
+        try:
+            qconfig.themeChanged.disconnect(self.update_style)
+        except Exception:
+            pass
+        super().closeEvent(event)

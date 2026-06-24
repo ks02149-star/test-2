@@ -122,9 +122,9 @@ class HomeInterface(ScrollArea):
         
         self.scraper_card = FeatureCard(FluentIcon.DOCUMENT, "블로그 순위 체크", "키워드별 블로그 순위 탐색")
         self.place_card = FeatureCard(getattr(FluentIcon, "POI", FluentIcon.SEARCH), "플레이스 순위 체크", "키워드별 플레이스 순위 탐색")
-        self.company_card = FeatureCard(FluentIcon.PEOPLE, "업체 리스트", "업체별 링크 관리, 휴진 체크")
         self.index_card = FeatureCard(getattr(FluentIcon, "PIE_SINGLE", FluentIcon.DOCUMENT), "블로그 통계 대시보드", "블로그 지수 분석 및 확인")
-        self.spell_card = FeatureCard(FluentIcon.EDIT, "맞춤법 검사기", "맞춤법 검사기")
+        self.holiday_card = FeatureCard(getattr(FluentIcon, "CHECKBOX", FluentIcon.ACCEPT), "업체별 휴진 체크", "업체별 휴진 정보 체크 및 동기화")
+        self.company_card = FeatureCard(FluentIcon.PEOPLE, "업체 리스트", "업체별 링크 관리, 휴진 체크")
         
         self.schedule_card = MonthlyScheduleSummaryCard(self.main_window)
         
@@ -136,15 +136,15 @@ class HomeInterface(ScrollArea):
         
         self.scraper_card.clicked.connect(lambda: self.main_window.switchTo(self.main_window.scraper_interface))
         self.place_card.clicked.connect(lambda: self.main_window.switchTo(self.main_window.place_scraper_interface))
-        self.company_card.clicked.connect(lambda: self.main_window.switchTo(self.main_window.company_list_interface))
         self.index_card.clicked.connect(lambda: self.main_window.switchTo(self.main_window.index_check_interface))
-        self.spell_card.clicked.connect(lambda: self.main_window.switchTo(self.main_window.spell_check_interface))
+        self.holiday_card.clicked.connect(lambda: self.main_window.switchTo(self.main_window.holiday_check_interface))
+        self.company_card.clicked.connect(lambda: self.main_window.switchTo(self.main_window.company_list_interface))
         
         self.grid_layout.addWidget(self.scraper_card, 0, 0)
         self.grid_layout.addWidget(self.place_card, 0, 1)
-        self.grid_layout.addWidget(self.company_card, 1, 0)
-        self.grid_layout.addWidget(self.index_card, 1, 1)
-        self.grid_layout.addWidget(self.spell_card, 2, 0)
+        self.grid_layout.addWidget(self.index_card, 1, 0)
+        self.grid_layout.addWidget(self.holiday_card, 1, 1)
+        self.grid_layout.addWidget(self.company_card, 2, 0)
         self.grid_layout.addWidget(self.schedule_card, 2, 1)
         
         self.left_panel.addLayout(self.grid_layout)
