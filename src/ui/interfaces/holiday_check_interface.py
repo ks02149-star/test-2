@@ -40,9 +40,18 @@ class HolidayCheckInterface(QWidget):
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
         
-        # Title
+        # Title and Sheet Shortcut
+        title_layout = QHBoxLayout()
         self.title_label = TitleLabel("업체별 휴진 체크", self)
-        left_layout.addWidget(self.title_label)
+        title_layout.addWidget(self.title_label)
+        
+        title_layout.addStretch(1)
+        
+        self.sheet_shortcut_btn = PushButton("시트 바로가기", self)
+        self.sheet_shortcut_btn.clicked.connect(self.open_google_sheet)
+        title_layout.addWidget(self.sheet_shortcut_btn)
+        
+        left_layout.addLayout(title_layout)
         
         left_layout.addSpacing(25)
         
@@ -188,6 +197,11 @@ class HolidayCheckInterface(QWidget):
         self.splitter.addWidget(left_panel)
         self.splitter.addWidget(right_panel)
         self.splitter.setSizes([300, 700])
+        
+    def open_google_sheet(self):
+        from src.core.holiday_threads import SPREADSHEET_ID
+        url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/edit"
+        QDesktopServices.openUrl(QUrl(url))
         
     def save_current_to_memory(self):
         if not self.selected_company: return
