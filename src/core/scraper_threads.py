@@ -117,9 +117,10 @@ class ScraperWorker(QThread):
             options.add_argument(f"--window-size={size}")
             options.page_load_strategy = 'eager'
             
-            service = Service(self.global_driver_path)
+            from subprocess import CREATE_NO_WINDOW
+            service = Service(self.global_driver_path, creation_flags=CREATE_NO_WINDOW)
             driver = webdriver.Chrome(service=service, options=options)
-            driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": "Object.defineProperty(navigator, \'webdriver\', { get: () => undefined })"})
+            driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": "Object.defineProperty(navigator, 'webdriver', { get: () => undefined })"})
             self.thread_local.driver = driver
             
             with self.driver_pool_lock:
@@ -545,7 +546,8 @@ class StatsScraperWorker(QThread):
             os.makedirs(profile_dir, exist_ok=True)
             options.add_argument(f"--user-data-dir={profile_dir}")
             
-            service = Service(self.global_driver_path)
+            from subprocess import CREATE_NO_WINDOW
+            service = Service(self.global_driver_path, creation_flags=CREATE_NO_WINDOW)
             self.driver = webdriver.Chrome(service=service, options=options)
             
             # 크롬 프로필에 이전 종료 시의 좌표(화면 밖)가 저장되어 있을 수 있으므로 화면 안으로 원복
