@@ -32,7 +32,7 @@ def main():
 
     print("\n3. 프로그램 빌드 시작! (잠시만 기다려주세요...)")
     pyinstaller_args = [
-        "pyinstaller",
+        sys.executable, "-m", "PyInstaller",
         "--noconfirm",
         "--onedir",
         "--windowed",
