@@ -7,6 +7,7 @@ from src.ui.interfaces.holiday_check_interface import HolidayCheckInterface
 from src.ui.interfaces.index_check_interface import IndexCheckInterface
 from src.ui.interfaces.spell_check_interface import SpellCheckInterface
 from src.ui.interfaces.setting_interface import SettingInterface
+from src.ui.interfaces.authority_test_interface import AuthorityTestInterface
 
 import os
 import sys
@@ -45,6 +46,7 @@ class MainWindow(FluentWindow):
         self.holiday_check_interface = HolidayCheckInterface(self)
         self.index_check_interface = IndexCheckInterface(self)
         self.spell_check_interface = SpellCheckInterface(self)
+        self.authority_test_interface = AuthorityTestInterface(self)
         self.settings_interface = SettingInterface(self)
         
         self.addSubInterface(self.home_interface, FluentIcon.HOME, '홈')
@@ -55,6 +57,7 @@ class MainWindow(FluentWindow):
         self.addSubInterface(self.place_scraper_interface, getattr(FluentIcon, "POI", FluentIcon.SEARCH), '플레이스 순위 체크')
         self.addSubInterface(self.index_check_interface, getattr(FluentIcon, "PIE_SINGLE", FluentIcon.DOCUMENT), '블로그 통계 대시보드')
         self.addSubInterface(self.spell_check_interface, FluentIcon.EDIT, '맞춤법 검사기')
+        self.addSubInterface(self.authority_test_interface, getattr(FluentIcon, "SHIELD", FluentIcon.INFO), '권한테스트')
         self.addSubInterface(self.settings_interface, FluentIcon.SETTING, '설정', position=NavigationItemPosition.BOTTOM)
         
         self.navigationInterface.addItem('logout_btn', FluentIcon.POWER_BUTTON, '로그아웃', position=NavigationItemPosition.BOTTOM, onClick=self.handle_logout)

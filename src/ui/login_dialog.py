@@ -365,6 +365,7 @@ class LoginDialog(QDialog):
         global SESSION
         SESSION["id"] = data["id"]
         SESSION["name"] = data["name"]
+        SESSION["is_admin"] = data.get("is_admin", False)
         
         if self.auto_login_cb.isChecked():
             hashed_pw = hashlib.sha256(self.login_pw_input.text().encode('utf-8')).hexdigest()

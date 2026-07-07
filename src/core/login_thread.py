@@ -54,12 +54,22 @@ class LoginThread(QThread):
             # Hash password
             hashed_pw = hashlib.sha256(self.password.encode('utf-8')).hexdigest()
             
+            # Parse Admin and Non-admin IDs
+            admin_ids = []
+            non_admin_ids = []
+            for row in records[1:]:
+                if len(row) > 4 and row[4].strip():
+                    admin_ids.append(row[4].strip())
+                if len(row) > 5 and row[5].strip():
+                    non_admin_ids.append(row[5].strip())
+            
             if self.mode == "auto_login":
                 for row in records[1:]:
                     if len(row) >= 3:
                         r_id, r_pw, r_name = row[0], row[1], row[2]
                         if r_id == self.user_id and r_pw == self.password:
-                            self.success.emit({"id": r_id, "name": r_name})
+                            is_admin = r_id in admin_ids
+                            self.success.emit({"id": r_id, "name": r_name, "is_admin": is_admin})
                             return
                 self.error.emit("자동 로그인 실패")
                 return
@@ -70,7 +80,8 @@ class LoginThread(QThread):
                         r_id, r_pw, r_name = row[0], row[1], row[2]
                         if r_id == self.user_id:
                             if r_pw == hashed_pw:
-                                self.success.emit({"id": r_id, "name": r_name})
+                                is_admin = r_id in admin_ids
+                                self.success.emit({"id": r_id, "name": r_name, "is_admin": is_admin})
                                 return
                             else:
                                 self.error.emit("비밀번호가 일치하지 않습니다.")

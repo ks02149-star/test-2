@@ -34,5 +34,6 @@ os.makedirs(DATA_DIR, exist_ok=True)
 # --- Global Session ---
 SESSION = {
     "id": None,
-    "name": None
+    "name": None,
+    "is_admin": False
 }
