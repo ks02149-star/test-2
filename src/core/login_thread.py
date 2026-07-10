@@ -12,39 +12,29 @@ import threading
 import requests
 from bs4 import BeautifulSoup
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject
-from src.config import SESSION, WORKSPACE_DIR, ASSETS_DIR, DATA_DIR, SETTINGS_PATH, CREDENTIALS_PATH
-
+from src.config import SESSION, WORKSPACE_DIR, ASSETS_DIR, DATA_DIR, SETTINGS_PATH, CREDENTIALS_PATH, SPREADSHEET_ID
+from src.core.google_sheets_manager import GoogleSheetsManager
 
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 
 class LoginThread(QThread):
     success = pyqtSignal(dict)
     error = pyqtSignal(str)
     signup_success = pyqtSignal(str)
     
-    def __init__(self, mode, user_id, password, name="", spreadsheet_id="1wWLxMTY3D5urtn0gomepgA1blQnyz05BUi2wepWBTDk"):
+    def __init__(self, mode, user_id, password, name=""):
         super().__init__()
         self.mode = mode
         self.user_id = user_id
         self.password = password
         self.name = name
-        self.spreadsheet_id = spreadsheet_id
         
     def run(self):
         try:
-            base_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
-            creds_path = CREDENTIALS_PATH
-            if not os.path.exists(creds_path):
-                self.error.emit("credentials.json 파일을 찾을 수 없습니다.")
-                return
-
-            scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-            creds = ServiceAccountCredentials.from_json_keyfile_name(creds_path, scope)
-            client = gspread.authorize(creds)
+            manager = GoogleSheetsManager()
             
             try:
-                sheet = client.open_by_key(self.spreadsheet_id).worksheet("users")
+                sheet = manager.get_worksheet(SPREADSHEET_ID, "users")
             except gspread.exceptions.WorksheetNotFound:
                 self.error.emit("스프레드시트에 'users' 탭이 없습니다.")
                 return

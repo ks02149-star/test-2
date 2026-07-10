@@ -12,7 +12,8 @@ import threading
 import requests
 from bs4 import BeautifulSoup
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject
-from src.config import SESSION, WORKSPACE_DIR, ASSETS_DIR, DATA_DIR, SETTINGS_PATH, CREDENTIALS_PATH
+from src.config import SESSION, WORKSPACE_DIR, ASSETS_DIR, DATA_DIR, SETTINGS_PATH, CREDENTIALS_PATH, SPREADSHEET_ID
+from src.core.google_sheets_manager import GoogleSheetsManager
 
 import pandas as pd
 import openpyxl
@@ -25,35 +26,29 @@ from selenium.common.exceptions import TimeoutException
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.service import Service
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 
 
 class ScheduleFetchThread(QThread):
     data_fetched = pyqtSignal(object)
     error_occurred = pyqtSignal(str)
     
-    def __init__(self, spreadsheet_id="1wWLxMTY3D5urtn0gomepgA1blQnyz05BUi2wepWBTDk", sheet_name="schedule"):
+    def __init__(self, sheet_name="schedule"):
         super().__init__()
-        self.spreadsheet_id = spreadsheet_id
         self.sheet_name = sheet_name
         
     def run(self):
 
         try:
-            base_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
-            creds_path = CREDENTIALS_PATH
-            if not os.path.exists(creds_path):
-                self.error_occurred.emit("credentials.json 파일을 찾을 수 없습니다.")
-                return
-
-            scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-            creds = ServiceAccountCredentials.from_json_keyfile_name(creds_path, scope)
-            client = gspread.authorize(creds)
+            manager = GoogleSheetsManager()
             
-            import urllib.parse
-            sort_range = urllib.parse.quote('정렬기준!A:A')
-            url = f'https://sheets.googleapis.com/v4/spreadsheets/{self.spreadsheet_id}?includeGridData=true&ranges={self.sheet_name}!A:C&ranges=holidays!A:B&ranges={sort_range}'
-            res = client.http_client.request('get', url)
+            def _fetch():
+                client = manager.get_client()
+                import urllib.parse
+                sort_range = urllib.parse.quote('정렬기준!A:A')
+                url = f'https://sheets.googleapis.com/v4/spreadsheets/{SPREADSHEET_ID}?includeGridData=true&ranges={self.sheet_name}!A:C&ranges=holidays!A:B&ranges={sort_range}'
+                return client.http_client.request('get', url)
+            
+            res = manager.execute_with_retry(_fetch)
             
             if res.status_code != 200:
                 self.error_occurred.emit("데이터를 가져오는데 실패했습니다.")
@@ -145,32 +140,19 @@ class ScheduleFetchThread(QThread):
 class ScheduleAddThread(QThread):
     error_occurred = pyqtSignal(str)
     
-    def __init__(self, start_date, end_date, text, creator_id, spreadsheet_id="1wWLxMTY3D5urtn0gomepgA1blQnyz05BUi2wepWBTDk", sheet_name="schedule"):
+    def __init__(self, start_date, end_date, text, creator_id, sheet_name="schedule"):
         super().__init__()
         self.start_date = start_date
         self.end_date = end_date
         self.text = text
         self.creator_id = creator_id
-        self.spreadsheet_id = spreadsheet_id
         self.sheet_name = sheet_name
         
     def run(self):
 
         try:
-            import os, sys
-            base_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
-            creds_path = CREDENTIALS_PATH
-            if not os.path.exists(creds_path):
-                self.error_occurred.emit("credentials.json 을 찾을 수 없습니다.")
-                return
-
-            import gspread
-            from oauth2client.service_account import ServiceAccountCredentials
-            scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-            creds = ServiceAccountCredentials.from_json_keyfile_name(creds_path, scope)
-            client = gspread.authorize(creds)
-            
-            sheet = client.open_by_key(self.spreadsheet_id).worksheet(self.sheet_name)
+            manager = GoogleSheetsManager()
+            sheet = manager.get_worksheet(SPREADSHEET_ID, self.sheet_name)
             
             from datetime import datetime, timedelta
             start = datetime.strptime(self.start_date, "%Y-%m-%d")
@@ -195,31 +177,18 @@ class ScheduleDeleteThread(QThread):
     error_occurred = pyqtSignal(str)
     success = pyqtSignal()
     
-    def __init__(self, date_str, text, creator_id, spreadsheet_id="1wWLxMTY3D5urtn0gomepgA1blQnyz05BUi2wepWBTDk", sheet_name="schedule"):
+    def __init__(self, date_str, text, creator_id, sheet_name="schedule"):
         super().__init__()
         self.date_str = date_str
         self.text = text
         self.creator_id = creator_id
-        self.spreadsheet_id = spreadsheet_id
         self.sheet_name = sheet_name
         
     def run(self):
 
         try:
-            import os, sys
-            base_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
-            creds_path = CREDENTIALS_PATH
-            if not os.path.exists(creds_path):
-                self.error_occurred.emit("credentials.json 을 찾을 수 없습니다.")
-                return
-
-            import gspread
-            from oauth2client.service_account import ServiceAccountCredentials
-            scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-            creds = ServiceAccountCredentials.from_json_keyfile_name(creds_path, scope)
-            client = gspread.authorize(creds)
-            
-            sheet = client.open_by_key(self.spreadsheet_id).worksheet(self.sheet_name)
+            manager = GoogleSheetsManager()
+            sheet = manager.get_worksheet(SPREADSHEET_ID, self.sheet_name)
             
             records = sheet.get_all_values()
             found_index = -1

@@ -219,8 +219,7 @@ def patch_calendar():
 
     def new_init(self, parent=None):
         orig_init(self, parent)
-        self.weekDays = [self.tr('Su'), self.tr('Mo'), self.tr('Tu'), self.tr('We'),
-                         self.tr('Th'), self.tr('Fr'), self.tr('Sa')]
+        self.weekDays = ['일', '월', '화', '수', '목', '금', '토']
         while self.weekDayLayout.count():
             item = self.weekDayLayout.takeAt(0)
             if item.widget():
@@ -249,8 +248,16 @@ def patch_calendar():
             currentDate = currentDate.addDays(1)
             
         self.addItems(items)
-        for i, date in enumerate(dates):
-            self.item(i + bias).setData(cv.Qt.UserRole, date)
+        for i in range(bias, self.count()):
+            item = self.item(i)
+            item.setData(cv.Qt.UserRole, dates[i-bias])
+            item.setSizeHint(self.gridSize())
+            
+        if hasattr(self, '_dateToRow'):
+            row = self._dateToRow(self.currentDate)
+        else:
+            row = self.dateToRow(self.currentDate)
+        self.delegate.setCurrentIndex(self.model().index(row))
 
     def new_dateToRow(self, date: cv.QDate):
         startDate = cv.QDate(self.minYear, 1, 1)
@@ -258,8 +265,16 @@ def patch_calendar():
         return days + (startDate.dayOfWeek() % 7)
 
     cv.DayScrollView.__init__ = new_init
-    cv.DayScrollView.initItems = new_initItems
-    cv.DayScrollView.dateToRow = new_dateToRow
+    if hasattr(cv.DayScrollView, '_initItems'):
+        cv.DayScrollView._initItems = new_initItems
+    else:
+        cv.DayScrollView.initItems = new_initItems
+        
+    if hasattr(cv.DayScrollView, '_dateToRow'):
+        cv.DayScrollView._dateToRow = new_dateToRow
+    else:
+        cv.DayScrollView.dateToRow = new_dateToRow
+        
     cv.DayScrollView._patched = True
 
 

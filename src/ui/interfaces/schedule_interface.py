@@ -96,7 +96,7 @@ class ScheduleInterface(ScrollArea):
         month = self.month_combo.currentData()
         if not year or not month: return
         
-        days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+        days = ["일", "월", "화", "수", "목", "금", "토"]
         for i, day in enumerate(days):
             lbl = QLabel(day)
             lbl.setAlignment(Qt.AlignCenter)
@@ -212,13 +212,19 @@ class ScheduleInterface(ScrollArea):
         if m_idx >= 0: self.month_combo.setCurrentIndex(m_idx)
         self.trigger_refresh()
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.trigger_refresh()
+
     def trigger_refresh(self):
+        self.refresh_btn.setEnabled(False)
         self.fetch_thread = ScheduleFetchThread()
         self.fetch_thread.data_fetched.connect(self.on_data_fetched)
         self.fetch_thread.error_occurred.connect(self.on_error_occurred)
         self.fetch_thread.start()
 
     def on_data_fetched(self, data):
+        self.refresh_btn.setEnabled(True)
         self.schedule_data.clear()
         self.holidays_data = data.get('holidays', {})
         for i, row in enumerate(data.get('schedules', [])):

@@ -424,6 +424,12 @@ class ScheduleAddDialog(QDialog):
         self.chk_am_half = CheckBox("오전반차")
         self.chk_pm_half = CheckBox("오후반차")
         
+        from src.config import SESSION
+        if not SESSION.get('is_admin', False):
+            self.chk_annual.hide()
+            self.chk_am_half.hide()
+            self.chk_pm_half.hide()
+        
         self.checkboxes = [self.chk_meeting, self.chk_work, self.chk_annual, self.chk_am_half, self.chk_pm_half]
         for chk in self.checkboxes:
             check_layout.addWidget(chk)

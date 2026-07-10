@@ -8,6 +8,9 @@ from src.ui.interfaces.index_check_interface import IndexCheckInterface
 from src.ui.interfaces.spell_check_interface import SpellCheckInterface
 from src.ui.interfaces.setting_interface import SettingInterface
 from src.ui.interfaces.authority_test_interface import AuthorityTestInterface
+from src.ui.interfaces.approval_request_interface import ApprovalRequestInterface
+from src.ui.interfaces.approval_check_interface import ApprovalCheckInterface
+from src.ui.interfaces.approval_manage_interface import ApprovalManageInterface
 
 import os
 import sys
@@ -58,6 +61,18 @@ class MainWindow(FluentWindow):
         self.addSubInterface(self.index_check_interface, getattr(FluentIcon, "PIE_SINGLE", FluentIcon.DOCUMENT), '블로그 통계 대시보드')
         self.addSubInterface(self.spell_check_interface, FluentIcon.EDIT, '맞춤법 검사기')
         self.addSubInterface(self.authority_test_interface, getattr(FluentIcon, "SHIELD", FluentIcon.INFO), '권한테스트')
+        
+        # 전자결재 시스템 추가
+        self.approval_request_interface = ApprovalRequestInterface(self)
+        self.approval_check_interface = ApprovalCheckInterface(self)
+        self.addSubInterface(self.approval_request_interface, FluentIcon.EDIT, '전자결재')
+        self.addSubInterface(self.approval_check_interface, FluentIcon.HISTORY, '내 결재 확인')
+        
+        # 관리자 전용 '결재관리'
+        if SESSION.get('id') in ['hyuni3966', '테스트3']:
+            self.approval_manage_interface = ApprovalManageInterface(self)
+            self.addSubInterface(self.approval_manage_interface, getattr(FluentIcon, "PEOPLE", FluentIcon.SEARCH), '결재관리')
+            
         self.addSubInterface(self.settings_interface, FluentIcon.SETTING, '설정', position=NavigationItemPosition.BOTTOM)
         
         self.navigationInterface.addItem('logout_btn', FluentIcon.POWER_BUTTON, '로그아웃', position=NavigationItemPosition.BOTTOM, onClick=self.handle_logout)
@@ -121,10 +136,11 @@ class MainWindow(FluentWindow):
                     border: 1px solid #3A3A3A !important;
                     border-radius: 10px !important;
                 }
-                TextEdit {
+                TextEdit, LineEdit, ComboBox {
                     background-color: #161616 !important;
                     border: 1px solid #2C2C2C !important;
                     border-radius: 8px !important;
+                    color: white !important;
                 }
             """)
         else:
